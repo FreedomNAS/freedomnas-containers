@@ -20,6 +20,7 @@ from freedomnas.package_manager import PackageManager  # noqa: E402
 sys.path.insert(0, str(REPO / "modules" / "containers"))
 import runtime  # noqa: E402
 import docker  # noqa: E402
+import apps  # noqa: E402
 
 
 class FakeEngine:
@@ -70,8 +71,17 @@ class FakeEngine:
             return f"{ds[kw['property']]}\tlocal", ""
         if key == ("zfs", "dataset_create_with"):
             props = dict(w.split("=", 1) for w in kw["options"].split() if "=" in w)
-            self.datasets[kw["dataset"]] = {"mountpoint": props["mountpoint"], "mounted": "no",
-                                           "canmount": props.get("canmount", "on")}
+            if "mountpoint" in props:
+                self.datasets[kw["dataset"]] = {"mountpoint": props["mountpoint"], "mounted": "no",
+                                               "canmount": props.get("canmount", "on")}
+            else:
+                mountpoint = self.tmp / "mnt" / kw["dataset"]
+                mountpoint.mkdir(parents=True, exist_ok=True)
+                self.datasets[kw["dataset"]] = {"mountpoint": str(mountpoint), "mounted": "yes", "canmount": "on"}
+            return "", ""
+        if key == ("zfs", "dataset_destroy_recursive"):
+            ds = self.datasets.pop(kw["dataset"])
+            shutil.rmtree(ds["mountpoint"], ignore_errors=True)
             return "", ""
         if key == ("zfs", "mount_dataset"):
             ds = self.datasets[kw["dataset"]]
@@ -98,6 +108,15 @@ class FakeEngine:
             return json.dumps({"DockerRootDir": "/var/lib/docker", "Driver": "overlayfs",
                                "ServerVersion": "29.0", "Containers": 2, "Images": 3}), ""
         return self.outputs.get(key, ("", ""))
+
+    def execute_with_stdin(self, category, action, stdin_data, timeout=30, **kw):
+        self.calls.append((category, action, kw))
+        if (category, action) in self.failing:
+            raise CommandExecutionError(f"Command failed\nCommand: x\nStderr: {category}.{action} refused")
+        if (category, action) == ("containers", "compose_write"):
+            Path(kw["file"]).write_text(stdin_data)
+        self.stdin = stdin_data
+        return "", ""
 
     def actions(self):
         return [f"{c}.{a}" for c, a, _ in self.calls]

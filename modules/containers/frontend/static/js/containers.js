@@ -16,9 +16,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-prune').addEventListener('click', pruneImages);
   document.getElementById('btn-run').addEventListener('click', () => openModal('modal-run'));
   document.getElementById('form-run').addEventListener('submit', runContainer);
-  document.getElementById('btn-logs-refresh').addEventListener('click', () => _logsFor && showLogs(_logsFor));
+  document.getElementById('btn-logs-refresh').addEventListener('click', () => _logsFor && showLogs(..._logsFor));
+  document.getElementById('btn-new-app').addEventListener('click', () => openAppForm(null));
+  document.getElementById('form-app').addEventListener('submit', saveApp);
+  document.getElementById('apps-body').addEventListener('click', onAppAction);
+  document.getElementById('btn-app-remove').addEventListener('click', removeApp);
   bindModalClose('modal-logs');
   bindModalClose('modal-run');
+  bindModalClose('modal-app');
+  bindModalClose('modal-app-remove');
   loadStatus();
 });
 
@@ -33,6 +39,7 @@ async function loadStatus() {
   render();
   const job = _status.job || {};
   const ready = _status.installed && _status.running && !!_status.version;
+  document.getElementById('apps-section').hidden = !ready;
   document.getElementById('containers-section').hidden = !ready;
   document.getElementById('images-section').hidden = !ready;
   const jobKey = `${job.kind}:${job.state}:${job.finished}`;
@@ -71,9 +78,10 @@ function render() {
   const job = s.job || {};
   const line = document.getElementById('job-line');
   const running = {install: 'Installing Docker…', setup: 'Setting up the datasets and starting Docker…',
-                   pull: 'Downloading the image…', run: 'Starting the container (downloading its image if needed)…'};
+                   pull: 'Downloading the image…', run: 'Starting the container (downloading its image if needed)…',
+                   app: 'Working on the app (downloading its images if needed)…'};
   const done = {install: 'Docker installed.', setup: `Docker now keeps its data on ${s.pool}.`,
-                pull: 'Image downloaded.', run: 'Container started.'};
+                pull: 'Image downloaded.', run: 'Container started.', app: 'App done.'};
   if (job.state === 'running') line.textContent = running[job.kind] || 'Working…';
   else if (job.state === 'failed') line.textContent = `The ${job.kind} failed: ${job.error}`;
   else if (job.state === 'done') line.textContent = done[job.kind] || 'Done.';
@@ -122,7 +130,137 @@ async function setupRuntime() {
 }
 
 async function loadLists() {
-  await Promise.all([loadContainers(), loadImages()]);
+  await Promise.all([loadApps(), loadContainers(), loadImages()]);
+}
+
+let _apps = [];
+
+async function loadApps() {
+  const body = document.getElementById('apps-body');
+  try {
+    _apps = (await apiJSON('GET', '/api/containers/apps')).apps || [];
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="4" class="text-muted">Could not list apps: ${esc(e.message)}</td></tr>`;
+    return;
+  }
+  if (!_apps.length) {
+    body.innerHTML = '<tr><td colspan="4" class="text-muted">No apps yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = _apps.map(a => {
+    const n = esc(a.name);
+    let badge;
+    if (a.state === 'down') badge = '<span class="badge badge-muted">Stopped</span>';
+    else if (a.containers && a.running === a.containers) badge = `<span class="badge badge-ok">Running (${a.running})</span>`;
+    else badge = `<span class="badge badge-warn">${a.running} of ${a.containers} running</span>`;
+    return `
+    <tr>
+      <td><span class="font-mono">${n}</span><div class="text-muted text-sm font-mono">${esc(a.dataset)}</div></td>
+      <td>${badge}</td>
+      <td class="font-mono text-sm">${esc(a.ports)}</td>
+      <td class="advanced-only" style="white-space:nowrap;text-align:right">
+        <button class="btn btn-secondary btn-sm" data-app="${n}" data-action="logs">Logs</button>
+        ${a.state === 'up'
+          ? `<button class="btn btn-secondary btn-sm" data-app="${n}" data-action="down">Stop</button>`
+          : `<button class="btn btn-secondary btn-sm" data-app="${n}" data-action="up">Start</button>`}
+        <button class="btn btn-secondary btn-sm" data-app="${n}" data-action="update">Update</button>
+        <button class="btn btn-secondary btn-sm" data-app="${n}" data-action="edit">Edit</button>
+        <button class="btn btn-secondary btn-sm" data-app="${n}" data-action="remove">Remove</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+let _editing = null;
+
+async function openAppForm(name) {
+  _editing = name;
+  const form = document.getElementById('form-app');
+  form.reset();
+  const nameInput = document.getElementById('f-app-name');
+  nameInput.readOnly = !!name;
+  document.getElementById('app-start-row').hidden = !!name;
+  document.getElementById('app-title').textContent = name ? `Edit ${name}` : 'New app';
+  document.getElementById('btn-app-submit').textContent = name ? 'Save' : 'Create';
+  if (name) {
+    try {
+      const app = await apiJSON('GET', `/api/containers/apps/${encodeURIComponent(name)}`);
+      nameInput.value = app.name;
+      document.getElementById('f-app-compose').value = app.compose;
+    } catch (e) {
+      toast(`Error: ${e.message}`, 'err');
+      return;
+    }
+  }
+  openModal('modal-app');
+}
+
+async function saveApp(e) {
+  e.preventDefault();
+  const name = document.getElementById('f-app-name').value.trim();
+  const compose = document.getElementById('f-app-compose').value;
+  const btn = document.getElementById('btn-app-submit');
+  setLoading(btn, true, 'Checking…');
+  try {
+    if (_editing) {
+      await apiJSON('PUT', `/api/containers/apps/${encodeURIComponent(name)}`, { compose });
+    } else {
+      await apiJSON('POST', '/api/containers/apps',
+                    { name, compose, start: document.getElementById('f-app-start').checked });
+    }
+    closeModal('modal-app');
+    toast(_editing ? `${name} saved.` : `${name} created.`, 'ok');
+  } catch (err) {
+    toast(`Error: ${err.message}`, 'err', 8000);
+  }
+  setLoading(btn, false);
+  loadStatus();
+  loadApps();
+}
+
+let _removing = null;
+
+async function onAppAction(e) {
+  const btn = e.target.closest('button[data-app]');
+  if (!btn) return;
+  const name = btn.dataset.app;
+  const action = btn.dataset.action;
+  if (action === 'logs') return showLogs('app', name);
+  if (action === 'edit') return openAppForm(name);
+  if (action === 'remove') {
+    _removing = name;
+    const app = _apps.find(a => a.name === name) || {};
+    document.getElementById('app-remove-title').textContent = `Remove ${name}`;
+    document.getElementById('app-remove-dataset').textContent = app.dataset || '';
+    document.getElementById('f-app-destroy').checked = false;
+    return openModal('modal-app-remove');
+  }
+  if (action === 'down' && !await confirm('Stop app', `Stop ${name}? Its containers are removed; its data stays.`, 'Stop')) return;
+  setLoading(btn, true, '…');
+  try {
+    await apiJSON('POST', `/api/containers/apps/${encodeURIComponent(name)}/${action}`);
+  } catch (err) {
+    toast(`Error: ${err.message}`, 'err');
+    setLoading(btn, false);
+  }
+  loadStatus();
+}
+
+async function removeApp() {
+  const name = _removing;
+  const destroy = document.getElementById('f-app-destroy').checked;
+  if (destroy && !await confirm('Destroy data', `Destroy the dataset of ${name} with everything in it? This cannot be undone.`, 'Destroy')) return;
+  const btn = document.getElementById('btn-app-remove');
+  setLoading(btn, true, 'Removing…');
+  try {
+    await apiJSON('DELETE', `/api/containers/apps/${encodeURIComponent(name)}?destroy_data=${destroy}`);
+    closeModal('modal-app-remove');
+    toast(`${name} removed.`, 'ok');
+  } catch (err) {
+    toast(`Error: ${err.message}`, 'err');
+  }
+  setLoading(btn, false);
+  loadLists();
 }
 
 let _containers = [];
@@ -166,7 +304,7 @@ async function onContainerAction(e) {
   if (!btn) return;
   const name = btn.dataset.name;
   const action = btn.dataset.action;
-  if (action === 'logs') return showLogs(name);
+  if (action === 'logs') return showLogs('container', name);
   const c = _containers.find(x => x.name === name) || {};
   if (action === 'stop' && !await confirm('Stop container', `Stop ${name}? What it serves stops until it is started again.`, 'Stop')) return;
   if (action === 'remove' && !await confirm('Remove container',
@@ -186,14 +324,15 @@ async function onContainerAction(e) {
   loadLists();
 }
 
-async function showLogs(name) {
-  _logsFor = name;
+async function showLogs(kind, name) {
+  _logsFor = [kind, name];
   document.getElementById('logs-title').textContent = `Logs of ${name}`;
   const pre = document.getElementById('logs-text');
   pre.textContent = 'Loading…';
   openModal('modal-logs');
   try {
-    const d = await apiJSON('GET', `/api/containers/containers/${encodeURIComponent(name)}/logs?lines=200`);
+    const base = kind === 'app' ? 'apps' : 'containers';
+    const d = await apiJSON('GET', `/api/containers/${base}/${encodeURIComponent(name)}/logs?lines=200`);
     pre.textContent = d.logs || '(no output)';
     pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
   } catch (e) {

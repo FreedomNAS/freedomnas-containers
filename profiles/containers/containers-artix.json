@@ -21,6 +21,12 @@
     "image_remove": "docker image rm {image}",
     "image_prune": "docker image prune -f",
     "run": "docker run -d {run_args} {image}",
+    "compose_check": "docker compose -p freedomnas-check -f - config --quiet",
+    "compose_write": "sh -c 'umask 022 && cat > \"$1\"' compose_write {file}",
+    "compose_up": "docker compose -p {project} -f {file} up -d --remove-orphans",
+    "compose_down": "docker compose -p {project} -f {file} down",
+    "compose_pull": "docker compose -p {project} -f {file} pull",
+    "compose_logs": "docker compose -p {project} -f {file} logs --tail {lines} --timestamps",
     "multi_args": [
       "run_args"
     ]

@@ -5,5 +5,7 @@ freedomnas-module-containers (0.1.0-1) unstable; urgency=medium
     reconciler
   * Containers and images from the WebUI: start, stop, restart, logs,
     remove, download, prune, and run a container (Expert)
+  * Apps: Docker Compose projects on datasets of their own, brought up
+    again at boot
 
  -- FreedomNAS Team <dev@freedomnas.io>  Sun, 11 Oct 2026 01:17:27 +0000

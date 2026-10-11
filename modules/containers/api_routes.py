@@ -17,6 +17,17 @@ POST   /images/pull                     — {"image": "nginx:alpine"} (a job)
 POST   /images/prune                    — remove the images no container uses and no tag names
 DELETE /images/{image}                  — remove one image
 
+GET    /apps                            — every app with its containers running
+POST   /apps                            — {name, compose, start}: a dataset <pool>/apps/<name>
+                                          holding compose.yaml; start brings it up (a job)
+GET    /apps/{name}                     — the app and its compose file
+PUT    /apps/{name}                     — {compose}: replace the compose file; a running app
+                                          is brought up again with it (a job)
+POST   /apps/{name}/{action}            — up, down, update (pull its images, then up) (jobs)
+GET    /apps/{name}/logs?lines=N        — the last N lines of every container of the app
+DELETE /apps/{name}?destroy_data=true   — take it down and forget it; destroy_data also
+                                          destroys its dataset
+
 Install, setup, pull and run can take minutes (a Gentoo install compiles
 Docker, an image download is as slow as the line), so they run in a thread,
 one at a time; /status reports how the last one went.
@@ -47,6 +58,7 @@ def _load(stem: str):
 
 runtime = _load("runtime")
 docker = _load("docker")
+apps = _load("apps")
 router = APIRouter()
 
 _lock = threading.Lock()
@@ -105,7 +117,7 @@ async def setup(body: dict, username: str = Depends(authenticate)):
 
 
 def _failure(exc: Exception) -> JSONResponse:
-    if isinstance(exc, docker.ContainerError):
+    if isinstance(exc, (docker.ContainerError, apps.AppError)):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
     return JSONResponse(status_code=500, content={"detail": docker.error_text(exc)})
 
@@ -179,3 +191,66 @@ async def prune_images(username: str = Depends(authenticate)):
 async def remove_image(image: str, username: str = Depends(authenticate)):
     result = await _call(docker.remove_image, get_engine(), image)
     return result if isinstance(result, JSONResponse) else {"removed": image}
+
+
+APP_ACTIONS = ("up", "down", "update")
+
+
+@router.get("/apps")
+async def list_apps(username: str = Depends(authenticate)):
+    result = await _call(apps.listing, runtime, docker, get_engine(), get_config())
+    return result if isinstance(result, JSONResponse) else {"apps": result}
+
+
+@router.post("/apps")
+async def create_app(body: dict, username: str = Depends(authenticate)):
+    name = str(body.get("name") or "").strip()
+    engine, config = get_engine(), get_config()
+    result = await _call(apps.create, runtime, engine, config, name, body.get("compose") or "")
+    if isinstance(result, JSONResponse):
+        return result
+    if body.get("start"):
+        return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+    return {"created": name}
+
+
+@router.get("/apps/{name}")
+async def get_app(name: str, username: str = Depends(authenticate)):
+    return await _call(apps.read, runtime, get_engine(), get_config(), name)
+
+
+@router.put("/apps/{name}")
+async def replace_app(name: str, body: dict, username: str = Depends(authenticate)):
+    engine, config = get_engine(), get_config()
+    result = await _call(apps.update, runtime, engine, config, name, body.get("compose") or "")
+    if isinstance(result, JSONResponse):
+        return result
+    current = await _call(apps.read, runtime, engine, config, name)
+    if not isinstance(current, JSONResponse) and current["state"] == "up":
+        return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+    return {"updated": name}
+
+
+@router.post("/apps/{name}/{action}")
+async def app_action(name: str, action: str, username: str = Depends(authenticate)):
+    if action not in APP_ACTIONS:
+        return JSONResponse(status_code=422, content={"detail": f"Unknown action '{action}'"})
+    engine, config = get_engine(), get_config()
+    current = await _call(apps.read, runtime, engine, config, name)
+    if isinstance(current, JSONResponse):
+        return current
+    if action == "update":
+        return _start_job("app", lambda: apps.refresh(runtime, engine, config, name))
+    return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, action))
+
+
+@router.get("/apps/{name}/logs")
+async def app_logs(name: str, lines: int = 200, username: str = Depends(authenticate)):
+    result = await _call(apps.logs, runtime, get_engine(), get_config(), name, lines)
+    return result if isinstance(result, JSONResponse) else {"name": name, "logs": result}
+
+
+@router.delete("/apps/{name}")
+async def remove_app(name: str, destroy_data: bool = False, username: str = Depends(authenticate)):
+    result = await _call(apps.remove, runtime, get_engine(), get_config(), name, destroy_data)
+    return result if isinstance(result, JSONResponse) else {"removed": name, "destroyed": destroy_data}

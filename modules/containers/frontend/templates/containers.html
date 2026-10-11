@@ -47,6 +47,24 @@
   </div>
 </div>
 
+<div class="section" id="apps-section" hidden>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
+      <span>Apps</span>
+      <button class="btn btn-primary btn-sm advanced-only" id="btn-new-app">New app</button>
+    </div>
+    <p class="text-muted" style="margin-top:0">An app is a Docker Compose project with a dataset of its own,
+      <span class="font-mono">&lt;pool&gt;/apps/&lt;name&gt;</span>: its compose file and the folders it mounts with
+      <span class="font-mono">./</span> live there. Apps that are up come back at every boot.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>App</th><th>State</th><th>Ports</th><th class="advanced-only"></th></tr></thead>
+        <tbody id="apps-body"><tr><td colspan="4" class="text-muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div class="section" id="containers-section" hidden>
   <div class="card">
     <div class="card-title" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
@@ -146,6 +164,62 @@
         <button type="submit" class="btn btn-primary" id="btn-run-submit">Run</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="modal-app" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <span class="modal-title" id="app-title">New app</span>
+      <button class="modal-close" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="form-app">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="f-app-name">Name</label>
+          <input id="f-app-name" class="input" required pattern="[a-z0-9][a-z0-9_-]{0,62}" placeholder="nextcloud">
+          <span class="form-hint">Lowercase letters, digits, - and _. It names the dataset and the Compose project.</span>
+        </div>
+        <div class="form-group">
+          <label for="f-app-compose">compose.yaml</label>
+          <textarea id="f-app-compose" class="textarea font-mono" rows="16" required spellcheck="false"
+            placeholder="services:&#10;  web:&#10;    image: nginx:alpine&#10;    ports:&#10;      - &quot;8080:80&quot;&#10;    volumes:&#10;      - ./html:/usr/share/nginx/html&#10;    restart: unless-stopped"></textarea>
+        </div>
+        <label class="checkbox-group" id="app-start-row">
+          <input type="checkbox" id="f-app-start" checked>
+          <label for="f-app-start">Start it now</label>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-app-submit">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-app-remove" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="app-remove-title">Remove app</span>
+      <button class="modal-close" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p>The app's containers are stopped and removed, and FreedomNAS forgets it.</p>
+      <label class="checkbox-group">
+        <input type="checkbox" id="f-app-destroy">
+        <label for="f-app-destroy">Also destroy its dataset <span class="font-mono" id="app-remove-dataset"></span>, with its compose file and data</label>
+      </label>
+      <span class="form-hint">Without it, the dataset stays on the pool: a new app with the same name uses it again, data included.</span>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+      <button type="button" class="btn btn-danger" id="btn-app-remove">Remove</button>
+    </div>
   </div>
 </div>
 {% endblock %}

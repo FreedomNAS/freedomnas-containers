@@ -1,8 +1,8 @@
 """
 ContainersModule — the container runtime and the datasets that hold it.
 
-The work is done in runtime.py, shared with api_routes.py; both load it by
-file path, as freedomnas-core loads this file, so the module needs no
+The work is done in runtime.py, docker.py and apps.py, shared with
+api_routes.py; both load them by file path, as freedomnas-core loads this file, so the module needs no
 importable package.
 """
 
@@ -26,17 +26,19 @@ except ImportError:
 logger = logging.getLogger("FreedomNAS.Module.Containers")
 
 
-def load_runtime():
-    name = "freedomnas_containers_runtime"
+def load(stem: str):
+    name = f"freedomnas_containers_{stem}"
     if name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("runtime.py"))
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{stem}.py"))
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)
     return sys.modules[name]
 
 
-runtime = load_runtime()
+runtime = load("runtime")
+docker = load("docker")
+apps = load("apps")
 
 
 class ContainersModule(FreedomNASModule):
@@ -80,4 +82,7 @@ class ContainersModule(FreedomNASModule):
             return False, str(exc)
 
     def reconcile(self, desired: dict, mode: str = "declarative") -> List:
-        return runtime.reconcile(self._engine, desired, mode)
+        results = runtime.reconcile(self._engine, desired, mode)
+        if any(r.target_state == "failed" for r in results):
+            return results
+        return results + apps.reconcile(runtime, docker, self._engine, desired)

@@ -19,6 +19,7 @@ Configuration, `modules.containers`:
     enabled   bool  the runtime was set up from the WebUI
     pool      str   the pool holding the datasets
     datasets  dict  directory name -> dataset, e.g. docker -> tank/containers/docker
+    apps      dict  see apps.py
 """
 
 from __future__ import annotations
@@ -257,7 +258,8 @@ def setup(engine, config, pool: str) -> Dict[str, Any]:
     keep_from_boot(engine)
     start(engine)
 
-    config.set_module_config(MODULE_ID, {"enabled": True, "pool": pool, "datasets": datasets})
+    config.set_module_config(MODULE_ID, {**config.get_module_config(MODULE_ID),
+                                         "enabled": True, "pool": pool, "datasets": datasets})
     return status(engine, config)
 
 

@@ -28,6 +28,13 @@ later.
   image with ports, volumes, environment and a restart policy (Expert).
   Names, image references and every option are checked before they reach
   `docker`, and `run`'s options reach it as separate words.
+- **Apps**: Docker Compose projects, each on a dataset `<pool>/apps/<name>`
+  holding its `compose.yaml` and the folders it mounts with `./`. The file
+  is checked with `docker compose config` before it is written; apps are
+  brought up, down and updated (pull, then up) as jobs, and `reconcile()`
+  brings up every app recorded as up whose containers are not all running,
+  after Docker. A removed app's dataset is kept unless asked otherwise, and
+  a new app of the same name uses it again.
 
 Configuration, `modules.containers` in `config.yaml`:
 
@@ -39,6 +46,10 @@ modules:
     datasets:
       docker: tank/containers/docker
       containerd: tank/containers/containerd
+    apps:
+      site:
+        dataset: tank/apps/site
+        state: up
 ```
 
 ## Layout
@@ -49,13 +60,15 @@ modules/containers/
 ├── module.py            ContainersModule: health(), reconcile()
 ├── runtime.py           the runtime: install, datasets, start after the pool, reconcile
 ├── docker.py            containers and images: list, actions, logs, pull, run, input checks
+├── apps.py              Compose apps on their own datasets: create, edit, up/down, update, remove, reconcile
 ├── api_routes.py        /api/containers/... (install, setup, pull and run run as jobs, one at a time)
 └── frontend/            containers.html, js/containers.js, icons.svg
 profiles/containers/
 └── containers-<os>.json runtime_check, info, data_dirs, data_move, data_copy,
                          socket_units (systemd), runtime_repository (Debian),
                          ps, start/stop/restart, remove(_force), logs, images,
-                         image_pull/_remove/_prune, run (run_args is a multi-argument)
+                         image_pull/_remove/_prune, run (run_args is a multi-argument),
+                         compose_check/_write/_up/_down/_pull/_logs
 tests/                   pytest against the freedomnas-core checkout beside this one
 ```
 
