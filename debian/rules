@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_install:
+	dh_install
+	mkdir -p debian/freedomnas-module-containers/usr/lib/freedomnas/modules
+	mkdir -p debian/freedomnas-module-containers/usr/lib/freedomnas/profiles
+	cp -r modules/containers  debian/freedomnas-module-containers/usr/lib/freedomnas/modules/containers
+	cp -r profiles/containers debian/freedomnas-module-containers/usr/lib/freedomnas/profiles/containers

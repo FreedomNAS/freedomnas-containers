@@ -1,0 +1,20 @@
+Source: freedomnas-module-containers
+Section: admin
+Priority: optional
+Maintainer: FreedomNAS Team <dev@freedomnas.io>
+Standards-Version: 4.6.2
+Build-Depends: debhelper-compat (= 13)
+Homepage: https://codeberg.org/FreedomNAS/freedomnas-containers
+Vcs-Browser: https://codeberg.org/FreedomNAS/freedomnas-containers
+Vcs-Git: https://codeberg.org/FreedomNAS/freedomnas-containers.git
+
+Package: freedomnas-module-containers
+Architecture: all
+Depends: ${misc:Depends}, freedomnas-core, freedomnas-webui
+Description: Containers for FreedomNAS: Docker on its own ZFS datasets
+ FreedomNAS community module that sets up the container runtime with its
+ data on a ZFS dataset of a chosen pool, outside the root dataset, so it
+ survives a rollback and can be snapshotted and replicated.
+ .
+ Ships modules/containers/ and profiles/containers/ under
+ /usr/lib/freedomnas/.

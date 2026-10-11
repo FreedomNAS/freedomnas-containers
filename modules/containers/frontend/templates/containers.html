@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Containers{% endblock %}
+{% block page_title %}Containers{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>Containers</h1>
+    <p>Docker, with its containers and images on a dataset of your pool</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="card">
+    <div class="card-title" style="margin-bottom:10px">Runtime</div>
+    <table style="width:100%;font-size:0.875rem">
+      <tbody id="runtime-body">
+        <tr><td colspan="2" class="text-muted">Loading…</td></tr>
+      </tbody>
+    </table>
+    <p class="form-hint" id="job-line" hidden></p>
+  </div>
+</div>
+
+<div class="section advanced-only" id="install-section" hidden>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:10px">Install Docker</div>
+    <p class="text-muted">Docker is installed from your edition's own packages. It can take a few minutes, on Gentoo much longer: it is compiled.</p>
+    <button class="btn btn-primary" id="btn-install">Install Docker</button>
+  </div>
+</div>
+
+<div class="section advanced-only" id="setup-section" hidden>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:10px">Where containers live</div>
+    <p class="text-muted">
+      Containers, images and volumes go on the datasets <span class="font-mono">&lt;pool&gt;/containers/docker</span>
+      and <span class="font-mono">&lt;pool&gt;/containers/containerd</span>, outside the system: a rollback of the system
+      leaves them alone, and the pool's snapshots and replication take them along. What Docker already holds is copied there.
+    </p>
+    <div class="form-group">
+      <label for="f-pool">Pool</label>
+      <select id="f-pool" class="input"></select>
+    </div>
+    <button class="btn btn-primary" id="btn-setup">Use this pool</button>
+    <span class="form-hint" style="display:block;margin-top:8px">Choose the pool once: moving containers to another pool later is not possible yet.</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/modules/containers/js/containers.js"></script>
+{% endblock %}

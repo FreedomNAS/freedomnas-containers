@@ -1,0 +1,30 @@
+{
+  "id": "containers",
+  "name": "Containers",
+  "version": "0.1.0",
+  "type": "community",
+  "description": "Docker with its containers and images on a ZFS dataset of a chosen pool",
+  "entry_point": "module:ContainersModule",
+  "supported_os": [
+    "debian",
+    "arch",
+    "artix",
+    "void",
+    "gentoo"
+  ],
+  "depends_on": [],
+  "webui": {
+    "api_routes": "api_routes.py",
+    "route_prefix": "/api/containers",
+    "router_attr": "router",
+    "templates_dir": "frontend/templates",
+    "static_dir": "frontend/static",
+    "page_route": "/containers/",
+    "page_template": "containers.html",
+    "nav": {
+      "label": "Containers",
+      "icon": "icons.svg#containers",
+      "level": "assisted"
+    }
+  }
+}

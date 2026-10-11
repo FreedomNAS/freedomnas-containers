@@ -1,0 +1,23 @@
+{
+  "containers": {
+    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself. data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=noauto), so Docker's own configuration and image store stay as they are.",
+    "runtime_check": "docker --version",
+    "info": "docker info --format json",
+    "data_dirs": {
+      "docker": "/var/lib/docker",
+      "containerd": "/var/lib/containerd"
+    },
+    "data_move": "mv {source} {target}",
+    "data_copy": "cp -a {source}/. {target}/",
+    "socket_units": [
+      "docker.socket"
+    ],
+    "runtime_repository": [
+      "install -d -m 755 /etc/apt/keyrings",
+      "curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc",
+      "chmod a+r /etc/apt/keyrings/docker.asc",
+      "sh -c '. /etc/os-release && printf \"Types: deb\\nURIs: https://download.docker.com/linux/debian\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n\" \"$VERSION_CODENAME\" \"$(dpkg --print-architecture)\" > /etc/apt/sources.list.d/docker.sources'",
+      "apt-get update"
+    ]
+  }
+}

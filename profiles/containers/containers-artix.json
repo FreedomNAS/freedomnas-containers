@@ -1,0 +1,13 @@
+{
+  "containers": {
+    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself. data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=noauto), so Docker's own configuration and image store stay as they are.",
+    "runtime_check": "docker --version",
+    "info": "docker info --format json",
+    "data_dirs": {
+      "docker": "/var/lib/docker",
+      "containerd": "/var/lib/containerd"
+    },
+    "data_move": "mv {source} {target}",
+    "data_copy": "cp -a {source}/. {target}/"
+  }
+}
