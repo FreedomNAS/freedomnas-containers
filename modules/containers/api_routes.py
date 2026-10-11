@@ -279,7 +279,8 @@ def _catalogue_entry(entry_id: str, username: str) -> dict:
         name, n = f"{item['id']}{n}", n + 1
     return {**catalogue.summary(item), "app_name": name,
             "defaults": catalogue.defaults(item, config, username, taken),
-            "users": catalogue._accounts(config)}
+            "users": catalogue._accounts(config),
+            "folders": catalogue.pool_folders(engine)}
 
 
 @router.get("/catalogue/{entry_id}")

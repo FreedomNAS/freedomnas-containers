@@ -9,7 +9,11 @@ account the app runs as.
 
 Setting types in app.json:
     port      a free TCP port on the NAS
-    folder    ./name inside the app's dataset, or a directory of a pool
+    folder    ./name inside the app's dataset, or a directory of a pool;
+              offered at every UI level. "owner": "uid:gid" gives the
+              folder to that id instead of the app's user; "empty": a
+              directory of a pool must be empty or not exist yet (its
+              parent on a pool), and is created and given to its owner
     user      a FreedomNAS account; writes its uid and gid to the keys
               named by "uid" and "gid"
     timezone  defaults to the system's
@@ -156,25 +160,42 @@ def defaults(item: Dict[str, Any], config, username: str, taken: Set[int]) -> Di
     return values
 
 
-def _pool_mountpoints(engine) -> List[str]:
+def _pool_datasets(engine) -> List[tuple]:
     out, _ = engine.execute("zfs", "dataset_list")
-    mountpoints = []
+    datasets = []
     for line in out.splitlines():
         fields = line.split("\t")
         if len(fields) < 5 or "/ROOT" in fields[0] or fields[5:6] == ["volume"]:
             continue
         mountpoint = fields[4]
         if mountpoint.startswith("/") and mountpoint != "/" and not mountpoint.startswith(SYSTEM_DIRS):
-            mountpoints.append(mountpoint.rstrip("/"))
-    return mountpoints
+            datasets.append((fields[0], mountpoint.rstrip("/")))
+    return datasets
 
 
-def _check_folder(engine, value: str) -> None:
+def _pool_mountpoints(engine) -> List[str]:
+    return [mountpoint for _, mountpoint in _pool_datasets(engine)]
+
+
+def pool_folders(engine) -> List[str]:
+    """The pool directories a folder setting offers, without the apps' and Docker's own."""
+    return sorted({mountpoint for name, mountpoint in _pool_datasets(engine)
+                   if name.split("/")[1:2] not in (["apps"], ["containers"])})
+
+
+def _check_folder(engine, value: str, setting: Dict[str, Any]) -> None:
     if _RELATIVE.fullmatch(value) and ".." not in value.split("/"):
         return
+    value = value.rstrip("/") or value
     if not _ABSOLUTE.fullmatch(value) or ".." in value.split("/"):
         raise CatalogueError(f"'{value}' is not a folder: ./name or a directory of a pool")
-    if not Path(value).is_dir():
+    path = Path(value)
+    if setting.get("empty"):
+        if path.exists() and (not path.is_dir() or any(path.iterdir())):
+            raise CatalogueError(f"{value} is not empty: choose an empty or a new folder")
+        if not path.exists() and not path.parent.is_dir():
+            raise CatalogueError(f"{path.parent} is not an existing directory")
+    elif not path.is_dir():
         raise CatalogueError(f"{value} is not an existing directory")
     if not any(value == m or value.startswith(m + "/") for m in _pool_mountpoints(engine)):
         raise CatalogueError(f"{value} is not on a pool")
@@ -201,7 +222,8 @@ def resolve(item: Dict[str, Any], values: Dict[str, str], engine, config, taken:
             if int(value) in taken:
                 raise CatalogueError(f"{label}: port {value} is already in use")
         elif kind == "folder":
-            _check_folder(engine, value)
+            _check_folder(engine, value, setting)
+            value = value if value.startswith("./") else value.rstrip("/") or value
         elif kind == "user":
             if value not in _accounts(config):
                 raise CatalogueError(f"{label}: '{value}' is not a FreedomNAS account")
@@ -256,12 +278,17 @@ def _kept_secrets(item: Dict[str, Any], env_path: Path) -> Dict[str, str]:
             if s["type"] in ("password", "secret") and s["key"] in old}
 
 
-def _folders(item: Dict[str, Any], env: Dict[str, str]) -> List[str]:
-    folders = list(item.get("prepare", []))
+def _folders(item: Dict[str, Any], env: Dict[str, str]) -> List[tuple]:
+    """Each folder to create before the first start, with its owner."""
+    uid, gid = _owner(item, env)
+    folders = [(folder, uid, gid) for folder in item.get("prepare", [])]
     for setting in item.get("settings", []):
         value = env.get(setting["key"], "")
-        if setting["type"] == "folder" and value.startswith("./") and value not in folders:
-            folders.append(value)
+        if setting["type"] != "folder" or any(value == f[0] for f in folders):
+            continue
+        if value.startswith("./") or setting.get("empty"):
+            owner = setting["owner"].split(":") if setting.get("owner") else (uid, gid)
+            folders.append((value, *owner))
     return folders
 
 
@@ -304,9 +331,9 @@ def install(runtime, apps, docker, engine, config, entry_id: str, name: str,
                 env_text=render_env(env))
     try:
         base = Path(apps.compose_file(runtime, engine, dataset)).parent
-        uid, gid = _owner(item, env)
-        for folder in _folders(item, env):
-            engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(base / folder[2:]))
+        for folder, uid, gid in _folders(item, env):
+            path = base / folder[2:] if folder.startswith("./") else Path(folder)
+            engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise

@@ -223,3 +223,39 @@ def test_a_stopped_catalogue_app_keeps_its_ports(nas, config):
 def test_pihole_records_its_dns_port(nas, config):
     install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
     assert config.section["apps"]["pihole"]["ports"] == [53, 8053]
+
+
+def test_nextclouds_data_folder_belongs_to_www_data(nas, config):
+    install(nas, config, "nextcloud")
+    assert env_of(nas, "nextcloud")["DATA"] == "./data"
+    owned = {Path(p).name: o for p, o in nas.owners.items()}
+    assert owned == {"data": ("33", "33")}
+
+
+def test_nextclouds_data_folder_on_the_pool_is_new_or_empty(nas, config, tmp_path):
+    pool = tmp_path / "tank"
+    pool.mkdir()
+    nas.extra_datasets.append(f"tank\t1\t1\t1\t{pool}\tfilesystem\tyes\t-")
+    install(nas, config, "nextcloud", DATA=f"{pool}/nextcloud/")
+    assert env_of(nas, "nextcloud")["DATA"] == f"{pool}/nextcloud"
+    assert nas.owners[f"{pool}/nextcloud"] == ("33", "33")
+
+    apps.remove(runtime, nas, config, "nextcloud", destroy_data=True)
+    full = pool / "photos"
+    full.mkdir()
+    (full / "a.jpg").write_text("x")
+    with pytest.raises(catalogue.CatalogueError, match="not empty"):
+        install(nas, config, "nextcloud", DATA=str(full))
+    with pytest.raises(catalogue.CatalogueError, match="not an existing directory"):
+        install(nas, config, "nextcloud", DATA=f"{pool}/missing/nextcloud")
+
+
+def test_the_folders_offered_leave_out_the_apps_and_docker(nas, tmp_path):
+    nas.extra_datasets += ["tank\t1\t1\t1\t/tank\tfilesystem\tyes\t-",
+                           "tank/media\t1\t1\t1\t/tank/media\tfilesystem\tyes\t-",
+                           "tank/apps\t1\t1\t1\t/tank/apps\tfilesystem\tyes\t-",
+                           "tank/apps/site\t1\t1\t1\t/tank/apps/site\tfilesystem\tyes\t-",
+                           "tank/containers/docker\t1\t1\t1\t/srv/docker\tfilesystem\tyes\t-"]
+    folders = catalogue.pool_folders(nas)
+    assert "/tank" in folders and "/tank/media" in folders
+    assert not any(f.startswith(("/tank/apps", "/srv/docker")) for f in folders)

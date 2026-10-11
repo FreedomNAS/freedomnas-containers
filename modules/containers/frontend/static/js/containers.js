@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindModalClose('modal-installed');
   document.getElementById('catalogue-grid').addEventListener('click', onCatalogueClick);
   document.getElementById('form-install').addEventListener('submit', installFromCatalogue);
+  document.getElementById('install-settings').addEventListener('change', onFolderSelect);
   loadStatus();
 });
 
@@ -201,10 +202,22 @@ async function loadCatalogue() {
     </div>`).join('');
 }
 
-function settingField(s, value, users) {
+function settingField(s, value, users, folders) {
   const id = `f-set-${esc(s.key)}`;
   const hint = s.hint ? `<span class="form-hint">${esc(s.hint)}</span>` : '';
   let input;
+  if (s.type === 'folder') {
+    const inside = String(s.default || '').startsWith('./') ? s.default : null;
+    const choices = [...(inside ? [[inside, `Inside the app (${inside})`]] : []),
+                     ...folders.map(f => [f, f])];
+    const known = choices.some(([v]) => v === value);
+    input = `<select id="${id}" class="input" data-folder-select>${choices.map(([v, l]) =>
+      `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+      <option value=""${known ? '' : ' selected'}>Another folder…</option></select>
+      <input class="input font-mono" style="margin-top:6px" data-key="${esc(s.key)}" data-folder
+        value="${esc(value)}" placeholder="/tank/folder" aria-label="${esc(s.label || s.key)}"${known ? ' hidden' : ''}>`;
+    return `<div class="form-group"><label for="${id}">${esc(s.label || s.key)}</label>${input}${hint}</div>`;
+  }
   if (s.type === 'user') {
     input = `<select id="${id}" class="input" data-key="${esc(s.key)}">${users.map(u =>
       `<option${u === value ? ' selected' : ''}>${esc(u)}</option>`).join('')}</select>`;
@@ -212,10 +225,19 @@ function settingField(s, value, users) {
     input = `<select id="${id}" class="input" data-key="${esc(s.key)}">${s.choices.map(c =>
       `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
   } else {
-    input = `<input id="${id}" class="input${s.type === 'password' || s.type === 'folder' ? ' font-mono' : ''}"
+    input = `<input id="${id}" class="input${s.type === 'password' ? ' font-mono' : ''}"
       data-key="${esc(s.key)}" value="${esc(value)}" ${s.type === 'port' ? 'inputmode="numeric"' : ''}>`;
   }
-  return `<div class="form-group"><label for="${id}">${esc(s.label || s.key)}</label>${input}${hint}</div>`;
+  return `<div class="form-group advanced-only"><label for="${id}">${esc(s.label || s.key)}</label>${input}${hint}</div>`;
+}
+
+function onFolderSelect(e) {
+  const select = e.target.closest('[data-folder-select]');
+  if (!select) return;
+  const input = select.parentElement.querySelector('[data-folder]');
+  input.hidden = select.value !== '';
+  input.value = select.value;
+  if (!select.value) input.focus();
 }
 
 async function onCatalogueClick(e) {
@@ -237,8 +259,12 @@ async function onCatalogueClick(e) {
   document.getElementById('install-note').hidden = !c.note;
   document.getElementById('f-install-name').value = c.app_name;
   document.getElementById('install-settings').innerHTML =
-    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [])).join('');
+    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [])).join('');
   document.getElementById('install-assisted').hidden = UILevel.current() !== 'assisted';
+  const hasFolders = c.settings.some(s => s.type === 'folder');
+  document.getElementById('install-assisted-folders').hidden = UILevel.current() !== 'assisted' || !hasFolders;
+  document.getElementById('install-assisted').textContent = `${hasFolders ? 'Everything else uses its'
+    : 'It is installed with its'} usual settings; passwords are made up for you and shown once at the end.`;
   openModal('modal-install');
 }
 
@@ -246,9 +272,8 @@ async function installFromCatalogue(e) {
   e.preventDefault();
   const c = _installing;
   const values = { ...c.defaults };
-  if (UILevel.current() !== 'assisted') {
-    document.querySelectorAll('#install-settings [data-key]').forEach(el => { values[el.dataset.key] = el.value.trim(); });
-  }
+  const fields = UILevel.current() === 'assisted' ? '#install-settings [data-folder]' : '#install-settings [data-key]';
+  document.querySelectorAll(fields).forEach(el => { values[el.dataset.key] = el.value.trim(); });
   const name = UILevel.current() === 'assisted' ? c.app_name
                                                 : document.getElementById('f-install-name').value.trim();
   const btn = document.getElementById('btn-install-submit');

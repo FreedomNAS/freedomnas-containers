@@ -10,6 +10,8 @@
     {"key": "ADMIN_PASSWORD", "label": "Administrator password", "type": "password", "show": true},
     {"key": "TRUSTED_DOMAINS", "label": "Addresses", "type": "hosts",
      "hint": "The names and addresses Nextcloud answers to, separated by spaces."},
+    {"key": "DATA", "label": "Data folder", "type": "folder", "default": "./data", "owner": "33:33", "empty": true,
+     "hint": "Where Nextcloud keeps everyone's files: inside the app, or an empty or new folder of your pool, e.g. /tank/nextcloud. Files already in a folder do not show up in Nextcloud."},
     {"key": "DB_PASSWORD", "type": "secret"},
     {"key": "DB_ROOT_PASSWORD", "type": "secret"},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}

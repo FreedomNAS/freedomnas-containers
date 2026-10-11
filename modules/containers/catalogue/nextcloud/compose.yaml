@@ -19,7 +19,7 @@ services:
       - "${PORT}:80"
     volumes:
       - ./html:/var/www/html
-      - ./data:/var/www/html/data
+      - ${DATA:-./data}:/var/www/html/data
     environment:
       MYSQL_HOST: db
       MYSQL_DATABASE: nextcloud
