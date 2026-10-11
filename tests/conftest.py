@@ -19,6 +19,7 @@ from freedomnas.package_manager import PackageManager  # noqa: E402
 
 sys.path.insert(0, str(REPO / "modules" / "containers"))
 import runtime  # noqa: E402
+import docker  # noqa: E402
 
 
 class FakeEngine:
@@ -40,6 +41,7 @@ class FakeEngine:
         self.datasets = {}
         self.installed = True
         self.running = set()
+        self.outputs = {}
 
     def get_profile_value(self, category, key):
         try:
@@ -95,7 +97,7 @@ class FakeEngine:
                 raise CommandExecutionError("Cannot connect to the Docker daemon")
             return json.dumps({"DockerRootDir": "/var/lib/docker", "Driver": "overlayfs",
                                "ServerVersion": "29.0", "Containers": 2, "Images": 3}), ""
-        return "", ""
+        return self.outputs.get(key, ("", ""))
 
     def actions(self):
         return [f"{c}.{a}" for c, a, _ in self.calls]

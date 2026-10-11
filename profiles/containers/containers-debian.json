@@ -18,6 +18,21 @@
       "chmod a+r /etc/apt/keyrings/docker.asc",
       "sh -c '. /etc/os-release && printf \"Types: deb\\nURIs: https://download.docker.com/linux/debian\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n\" \"$VERSION_CODENAME\" \"$(dpkg --print-architecture)\" > /etc/apt/sources.list.d/docker.sources'",
       "apt-get update"
+    ],
+    "ps": "docker ps -a --no-trunc --format json",
+    "start": "docker start {container}",
+    "stop": "docker stop {container}",
+    "restart": "docker restart {container}",
+    "remove": "docker rm {container}",
+    "remove_force": "docker rm -f {container}",
+    "logs": "docker logs --tail {lines} --timestamps {container}",
+    "images": "docker image ls --format json",
+    "image_pull": "docker pull {image}",
+    "image_remove": "docker image rm {image}",
+    "image_prune": "docker image prune -f",
+    "run": "docker run -d {run_args} {image}",
+    "multi_args": [
+      "run_args"
     ]
   }
 }

@@ -8,6 +8,21 @@
       "containerd": "/var/lib/containerd"
     },
     "data_move": "mv {source} {target}",
-    "data_copy": "cp -a {source}/. {target}/"
+    "data_copy": "cp -a {source}/. {target}/",
+    "ps": "docker ps -a --no-trunc --format json",
+    "start": "docker start {container}",
+    "stop": "docker stop {container}",
+    "restart": "docker restart {container}",
+    "remove": "docker rm {container}",
+    "remove_force": "docker rm -f {container}",
+    "logs": "docker logs --tail {lines} --timestamps {container}",
+    "images": "docker image ls --format json",
+    "image_pull": "docker pull {image}",
+    "image_remove": "docker image rm {image}",
+    "image_prune": "docker image prune -f",
+    "run": "docker run -d {run_args} {image}",
+    "multi_args": [
+      "run_args"
+    ]
   }
 }

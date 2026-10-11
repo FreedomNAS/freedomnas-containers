@@ -23,6 +23,11 @@ later.
 - **Start Docker after the pool**: Docker, containerd and `docker.socket`
   are kept from starting at boot; `reconcile()` mounts the datasets and
   then starts them, at every boot and after a restore.
+- **Containers and images**: list, start, stop, restart, logs and remove
+  containers; download, remove and prune images; run a container from an
+  image with ports, volumes, environment and a restart policy (Expert).
+  Names, image references and every option are checked before they reach
+  `docker`, and `run`'s options reach it as separate words.
 
 Configuration, `modules.containers` in `config.yaml`:
 
@@ -42,12 +47,15 @@ modules:
 modules/containers/
 ├── manifest.json        id, supported_os, webui (page /containers/, sidebar entry)
 ├── module.py            ContainersModule: health(), reconcile()
-├── runtime.py           everything the module does, through the engine
-├── api_routes.py        /api/containers/status, /install, /setup (install and setup run as jobs)
+├── runtime.py           the runtime: install, datasets, start after the pool, reconcile
+├── docker.py            containers and images: list, actions, logs, pull, run, input checks
+├── api_routes.py        /api/containers/... (install, setup, pull and run run as jobs, one at a time)
 └── frontend/            containers.html, js/containers.js, icons.svg
 profiles/containers/
 └── containers-<os>.json runtime_check, info, data_dirs, data_move, data_copy,
-                         socket_units (systemd), runtime_repository (Debian)
+                         socket_units (systemd), runtime_repository (Debian),
+                         ps, start/stop/restart, remove(_force), logs, images,
+                         image_pull/_remove/_prune, run (run_args is a multi-argument)
 tests/                   pytest against the freedomnas-core checkout beside this one
 ```
 
