@@ -10,7 +10,7 @@ Vcs-Git: https://codeberg.org/FreedomNAS/freedomnas-containers.git
 
 Package: freedomnas-module-containers
 Architecture: all
-Depends: ${misc:Depends}, freedomnas-core, freedomnas-webui
+Depends: ${misc:Depends}, freedomnas-core (>> 0.9.12), freedomnas-webui (>> 0.9.12)
 Description: Containers for FreedomNAS: Docker on its own ZFS datasets
  FreedomNAS community module that sets up the container runtime with its
  data on a ZFS dataset of a chosen pool, outside the root dataset, so it

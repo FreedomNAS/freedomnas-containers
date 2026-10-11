@@ -63,6 +63,11 @@ installed FreedomNAS.
 
 ## Packaging
 
+The package needs freedomnas-core and freedomnas-webui newer than 0.9.12:
+0.9.12's module loader reads only one modules directory, so a community
+module installed beside it hides the core modules, and its WebUI serves no
+module's static files.
+
 `debian/` and `PKGBUILD` install `modules/containers/` to
 `/usr/lib/freedomnas/modules/containers/` and `profiles/containers/` to
 `/usr/lib/freedomnas/profiles/containers/`. Void, Gentoo and FreeBSD

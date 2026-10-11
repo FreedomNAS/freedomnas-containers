@@ -6,7 +6,7 @@ pkgdesc="Containers for FreedomNAS: Docker on its own ZFS datasets"
 arch=('any')
 url="https://codeberg.org/FreedomNAS/freedomnas-containers"
 license=('MPL-2.0')
-depends=('freedomnas-core' 'freedomnas-webui')
+depends=('freedomnas-core>0.9.12' 'freedomnas-webui>0.9.12')
 source=("git+https://codeberg.org/FreedomNAS/freedomnas-containers.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
