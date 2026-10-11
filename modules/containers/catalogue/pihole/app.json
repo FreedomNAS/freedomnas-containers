@@ -1,0 +1,39 @@
+{
+  "id": "pihole",
+  "name": "Pi-hole",
+  "description": "Blocks ads and trackers for every device of your network, as its DNS server.",
+  "website": "https://pi-hole.net",
+  "web": {
+    "port": "PORT",
+    "path": "/admin/"
+  },
+  "settings": [
+    {
+      "key": "PORT",
+      "label": "Web port",
+      "type": "port",
+      "default": "8053"
+    },
+    {
+      "key": "DNS_ADDRESS",
+      "label": "DNS address",
+      "type": "address",
+      "hint": "The NAS address Pi-hole answers DNS on: give this one to your router or devices. Keep it static."
+    },
+    {
+      "key": "WEB_PASSWORD",
+      "label": "Web interface password",
+      "type": "password",
+      "show": true
+    },
+    {
+      "key": "TZ",
+      "label": "Time zone",
+      "type": "timezone"
+    }
+  ],
+  "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address.",
+  "address_ports": [
+    53
+  ]
+}

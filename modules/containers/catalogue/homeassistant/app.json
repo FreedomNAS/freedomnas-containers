@@ -1,0 +1,12 @@
+{
+  "id": "homeassistant",
+  "name": "Home Assistant",
+  "description": "Home automation that keeps your data at home: lights, sensors, heating and thousands of devices.",
+  "website": "https://www.home-assistant.io",
+  "web": {"port": "8123", "fixed": true},
+  "settings": [
+    {"key": "TZ", "label": "Time zone", "type": "timezone"}
+  ],
+  "ports": [8123],
+  "note": "Runs on the host network so it can find the devices of your home: it always answers on port 8123."
+}

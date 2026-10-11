@@ -25,7 +25,9 @@ def test_an_app_gets_a_dataset_holding_its_compose_file(engine, config):
     assert config.section["apps"] == {"web": {"dataset": "tank/apps/web", "state": "down"}}
     file = Path(engine.datasets["tank/apps/web"]["mountpoint"]) / "compose.yaml"
     assert file.read_text() == COMPOSE
-    assert engine.actions().index("containers.compose_check") < engine.actions().index("zfs.dataset_create_with")
+    [check] = [kw for c, a, kw in engine.calls if a == "compose_check"]
+    assert check["dir"] == str(file.parent)
+    assert engine.actions().index("containers.compose_check") < engine.actions().index("containers.compose_write")
 
 
 def test_creating_keeps_the_runtime_settings(engine, config):
@@ -141,7 +143,7 @@ def test_the_listing_counts_each_app_s_containers(engine, config):
                                               ("web-db-1", "exited", "", "web"), ("other", "running", "", "x"))
     [app] = apps.listing(runtime, docker, engine, config)
     assert (app["name"], app["state"], app["containers"], app["running"]) == ("web", "up", 2, 1)
-    assert app["ports"] == "0.0.0.0:8080->80/tcp"
+    assert app["ports"] == "8080→80"
 
 
 def desired(state="up"):
@@ -192,3 +194,8 @@ def test_the_module_brings_apps_up_after_the_runtime(engine, config):
     engine.running.clear()
     results = module.reconcile({**section, "apps": {"web": {"dataset": "tank/apps/web", "state": "up"}}})
     assert [r.action for r in results] == ["containers.start", "containers.apps.web"]
+
+
+def test_published_ports_are_shown_once_and_short():
+    text = "0.0.0.0:8090->80/tcp, [::]:8090->80/tcp, 10.0.2.15:53->53/udp, 0.0.0.0:8091->80/tcp"
+    assert docker.short_ports(text) == "8090→80, 53→53/udp, 8091→80"

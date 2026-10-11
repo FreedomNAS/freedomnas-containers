@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO / "modules" / "containers"))
 import runtime  # noqa: E402
 import docker  # noqa: E402
 import apps  # noqa: E402
+import catalogue  # noqa: E402
 
 
 class FakeEngine:
@@ -43,6 +44,8 @@ class FakeEngine:
         self.installed = True
         self.running = set()
         self.outputs = {}
+        self.owners = {}
+        self.extra_datasets = []
 
     def get_profile_value(self, category, key):
         try:
@@ -88,6 +91,14 @@ class FakeEngine:
             Path(ds["mountpoint"]).mkdir(parents=True, exist_ok=True)
             ds["mounted"] = "yes"
             return "", ""
+        if key == ("containers", "folder_prepare"):
+            Path(kw["path"]).mkdir(parents=True, exist_ok=True)
+            self.owners[kw["path"]] = (kw["uid"], kw["gid"])
+            return "", ""
+        if key == ("zfs", "dataset_list"):
+            rows = [f"{n}\t1\t1\t1\t{d['mountpoint']}\tfilesystem\t{d['mounted']}\t-"
+                    for n, d in self.datasets.items()]
+            return "\n".join(rows + self.extra_datasets), ""
         if key == ("containers", "data_move"):
             Path(kw["source"]).rename(kw["target"])
             return "", ""
@@ -113,7 +124,7 @@ class FakeEngine:
         self.calls.append((category, action, kw))
         if (category, action) in self.failing:
             raise CommandExecutionError(f"Command failed\nCommand: x\nStderr: {category}.{action} refused")
-        if (category, action) == ("containers", "compose_write"):
+        if (category, action) in (("containers", "compose_write"), ("containers", "env_write")):
             Path(kw["file"]).write_text(stdin_data)
         self.stdin = stdin_data
         return "", ""
@@ -123,8 +134,13 @@ class FakeEngine:
 
 
 class FakeConfig:
-    def __init__(self, section=None):
+    def __init__(self, section=None, users=("sarah",), timezone="Europe/Rome"):
         self.section = section or {}
+        self.users = [{"username": u} for u in users]
+        self.timezone = timezone
+
+    def to_dict(self):
+        return {"users": self.users, "system": {"timezone": self.timezone}}
 
     def get_module_config(self, module_id):
         return json.loads(json.dumps(self.section))

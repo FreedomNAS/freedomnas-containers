@@ -25,6 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
   bindModalClose('modal-run');
   bindModalClose('modal-app');
   bindModalClose('modal-app-remove');
+  bindModalClose('modal-install');
+  bindModalClose('modal-installed');
+  document.getElementById('catalogue-grid').addEventListener('click', onCatalogueClick);
+  document.getElementById('form-install').addEventListener('submit', installFromCatalogue);
   loadStatus();
 });
 
@@ -40,6 +44,8 @@ async function loadStatus() {
   const job = _status.job || {};
   const ready = _status.installed && _status.running && !!_status.version;
   document.getElementById('apps-section').hidden = !ready;
+  document.getElementById('catalogue-section').hidden = !ready;
+  if (ready && !_catalogue) loadCatalogue();
   document.getElementById('containers-section').hidden = !ready;
   document.getElementById('images-section').hidden = !ready;
   const jobKey = `${job.kind}:${job.state}:${job.finished}`;
@@ -156,7 +162,9 @@ async function loadApps() {
     return `
     <tr>
       <td><span class="font-mono">${n}</span><div class="text-muted text-sm font-mono">${esc(a.dataset)}</div></td>
-      <td>${badge}</td>
+      <td>${badge}${a.web_port && a.state === 'up'
+        ? ` <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener"
+             href="http://${esc(location.hostname)}:${esc(a.web_port)}/">Open</a>` : ''}</td>
       <td class="font-mono text-sm">${esc(a.ports)}</td>
       <td class="advanced-only" style="white-space:nowrap;text-align:right">
         <button class="btn btn-secondary btn-sm" data-app="${n}" data-action="logs">Logs</button>
@@ -169,6 +177,105 @@ async function loadApps() {
       </td>
     </tr>`;
   }).join('');
+}
+
+let _catalogue = null;
+let _installing = null;
+
+async function loadCatalogue() {
+  const grid = document.getElementById('catalogue-grid');
+  try {
+    _catalogue = (await apiJSON('GET', '/api/containers/catalogue')).entries || [];
+  } catch (e) {
+    grid.innerHTML = `<p class="text-muted">Could not read the catalogue: ${esc(e.message)}</p>`;
+    return;
+  }
+  grid.innerHTML = _catalogue.map(c => `
+    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+      <div class="font-bold">${esc(c.name)}</div>
+      <div class="text-muted text-sm" style="flex:1">${esc(c.description)}</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" data-entry="${esc(c.id)}">Install</button>
+        <a class="text-sm" href="${esc(c.website)}" target="_blank" rel="noopener">Website</a>
+      </div>
+    </div>`).join('');
+}
+
+function settingField(s, value, users) {
+  const id = `f-set-${esc(s.key)}`;
+  const hint = s.hint ? `<span class="form-hint">${esc(s.hint)}</span>` : '';
+  let input;
+  if (s.type === 'user') {
+    input = `<select id="${id}" class="input" data-key="${esc(s.key)}">${users.map(u =>
+      `<option${u === value ? ' selected' : ''}>${esc(u)}</option>`).join('')}</select>`;
+  } else if (s.type === 'choice') {
+    input = `<select id="${id}" class="input" data-key="${esc(s.key)}">${s.choices.map(c =>
+      `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+  } else {
+    input = `<input id="${id}" class="input${s.type === 'password' || s.type === 'folder' ? ' font-mono' : ''}"
+      data-key="${esc(s.key)}" value="${esc(value)}" ${s.type === 'port' ? 'inputmode="numeric"' : ''}>`;
+  }
+  return `<div class="form-group"><label for="${id}">${esc(s.label || s.key)}</label>${input}${hint}</div>`;
+}
+
+async function onCatalogueClick(e) {
+  const btn = e.target.closest('button[data-entry]');
+  if (!btn) return;
+  setLoading(btn, true, '…');
+  try {
+    _installing = await apiJSON('GET', `/api/containers/catalogue/${encodeURIComponent(btn.dataset.entry)}`);
+  } catch (err) {
+    toast(`Error: ${err.message}`, 'err');
+    setLoading(btn, false);
+    return;
+  }
+  setLoading(btn, false);
+  const c = _installing;
+  document.getElementById('install-title').textContent = `Install ${c.name}`;
+  document.getElementById('install-description').textContent = c.description;
+  document.getElementById('install-note').textContent = c.note || '';
+  document.getElementById('install-note').hidden = !c.note;
+  document.getElementById('f-install-name').value = c.app_name;
+  document.getElementById('install-settings').innerHTML =
+    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [])).join('');
+  document.getElementById('install-assisted').hidden = UILevel.current() !== 'assisted';
+  openModal('modal-install');
+}
+
+async function installFromCatalogue(e) {
+  e.preventDefault();
+  const c = _installing;
+  const values = { ...c.defaults };
+  if (UILevel.current() !== 'assisted') {
+    document.querySelectorAll('#install-settings [data-key]').forEach(el => { values[el.dataset.key] = el.value.trim(); });
+  }
+  const name = UILevel.current() === 'assisted' ? c.app_name
+                                                : document.getElementById('f-install-name').value.trim();
+  const btn = document.getElementById('btn-install-submit');
+  setLoading(btn, true, 'Installing…');
+  let result;
+  try {
+    result = await apiJSON('POST', `/api/containers/catalogue/${encodeURIComponent(c.id)}/install`, { name, values });
+  } catch (err) {
+    toast(`Error: ${err.message}`, 'err', 8000);
+    setLoading(btn, false);
+    return;
+  }
+  setLoading(btn, false);
+  closeModal('modal-install');
+  document.getElementById('installed-title').textContent = `${c.name} installed as ${result.name}`;
+  const rows = [];
+  if (result.web_port) {
+    const url = `http://${location.hostname}:${result.web_port}/`;
+    rows.push(['Address', `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`]);
+  }
+  for (const [label, value] of Object.entries(result.shown || {}))
+    rows.push([esc(label), `<span class="font-mono">${esc(value)}</span>`]);
+  document.getElementById('installed-body').innerHTML = rows.map(([l, v]) =>
+    `<tr><td class="text-muted" style="padding:5px 8px 5px 0">${l}</td><td>${v}</td></tr>`).join('');
+  openModal('modal-installed');
+  loadStatus();
+  loadApps();
 }
 
 let _editing = null;
@@ -284,7 +391,7 @@ async function loadContainers() {
     return `
     <tr>
       <td><span class="font-mono">${n}</span>${c.project ? ` <span class="badge badge-info">${esc(c.project)}</span>` : ''}</td>
-      <td class="font-mono text-sm">${esc(c.image)}</td>
+      <td class="font-mono text-sm" title="${esc(c.image)}">${esc(String(c.image || '').split('@')[0])}</td>
       <td><span class="badge ${badge}" title="${esc(c.status)}">${esc(c.state)}</span></td>
       <td class="font-mono text-sm">${esc(c.ports)}</td>
       <td class="advanced-only" style="white-space:nowrap;text-align:right">

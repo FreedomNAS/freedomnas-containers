@@ -47,6 +47,15 @@
   </div>
 </div>
 
+<div class="section" id="catalogue-section" hidden>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:10px">Catalogue</div>
+    <p class="text-muted" style="margin-top:0">Ready-made apps, installed as apps of their own.
+      <span class="advanced-only">Install lets you change their settings first.</span></p>
+    <div class="grid-3" id="catalogue-grid"></div>
+  </div>
+</div>
+
 <div class="section" id="apps-section" hidden>
   <div class="card">
     <div class="card-title" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
@@ -219,6 +228,52 @@
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" data-close>Cancel</button>
       <button type="button" class="btn btn-danger" id="btn-app-remove">Remove</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-install" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <span class="modal-title" id="install-title">Install</span>
+      <button class="modal-close" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="form-install">
+      <div class="modal-body">
+        <p class="text-muted" id="install-description" style="margin-top:0"></p>
+        <p class="form-hint" id="install-note"></p>
+        <div class="form-group advanced-only">
+          <label for="f-install-name">App name</label>
+          <input id="f-install-name" class="input" required pattern="[a-z0-9][a-z0-9_-]{0,62}">
+        </div>
+        <div id="install-settings" class="advanced-only"></div>
+        <p class="text-muted" id="install-assisted">It is installed with its usual settings; passwords are made up for you and shown once at the end.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-install-submit">Install</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-installed" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="installed-title">Installed</span>
+      <button class="modal-close" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p>It is starting now: the first start downloads its images and can take a few minutes.</p>
+      <table style="width:100%;font-size:0.875rem"><tbody id="installed-body"></tbody></table>
+      <p class="form-hint">Write the passwords down now: FreedomNAS does not show them again.</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-primary" data-close>Done</button>
     </div>
   </div>
 </div>

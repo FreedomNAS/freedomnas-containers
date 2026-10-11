@@ -1,0 +1,17 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Your own cloud: files, calendars, contacts and photos, synced to your phone and computers.",
+  "website": "https://nextcloud.com",
+  "web": {"port": "PORT"},
+  "settings": [
+    {"key": "PORT", "label": "Web port", "type": "port", "default": "8088"},
+    {"key": "ADMIN_USER", "label": "Administrator", "type": "text", "default": "admin"},
+    {"key": "ADMIN_PASSWORD", "label": "Administrator password", "type": "password", "show": true},
+    {"key": "TRUSTED_DOMAINS", "label": "Addresses", "type": "hosts",
+     "hint": "The names and addresses Nextcloud answers to, separated by spaces."},
+    {"key": "DB_PASSWORD", "type": "secret"},
+    {"key": "DB_ROOT_PASSWORD", "type": "secret"},
+    {"key": "TZ", "label": "Time zone", "type": "timezone"}
+  ]
+}

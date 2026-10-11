@@ -28,6 +28,7 @@ _IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,254}")
 _PORT = re.compile(r"(?:(?:\d{1,3}\.){3}\d{1,3}:)?\d{1,5}(?:-\d{1,5})?:\d{1,5}(?:-\d{1,5})?(?:/(?:tcp|udp))?")
 _VOLUME = re.compile(r"[^\s:]+:/[^\s:]*(?::(?:ro|rw))?")
 _ENV = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
+_PUBLISHED = re.compile(r"(?:[\d.]+|\[[0-9a-f:]*\]):(\d+)->(\d+)/(tcp|udp)")
 
 
 class ContainerError(Exception):
@@ -44,6 +45,16 @@ def check_image(value: str) -> str:
     if not isinstance(value, str) or not _IMAGE.fullmatch(value):
         raise ContainerError(f"'{value}' is not an image reference")
     return value
+
+
+def short_ports(text: str) -> str:
+    """'0.0.0.0:8090->80/tcp, [::]:8090->80/tcp' as '8090→80', each mapping once."""
+    seen: List[str] = []
+    for host, inner, proto in _PUBLISHED.findall(text or ""):
+        label = f"{host}→{inner}" + ("/udp" if proto == "udp" else "")
+        if label not in seen:
+            seen.append(label)
+    return ", ".join(seen)
 
 
 def _json_lines(out: str) -> List[Dict[str, Any]]:
@@ -75,7 +86,8 @@ def containers(engine) -> List[Dict[str, Any]]:
             "image": row.get("Image"),
             "state": row.get("State"),
             "status": row.get("Status"),
-            "ports": row.get("Ports") or "",
+            "ports": short_ports(row.get("Ports") or ""),
+            "published": row.get("Ports") or "",
             "created": row.get("CreatedAt"),
             "project": labels.get("com.docker.compose.project"),
         })

@@ -1,0 +1,16 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "Stream your films, series and music to every device, from a media folder of your pool.",
+  "website": "https://jellyfin.org",
+  "web": {"port": "PORT"},
+  "settings": [
+    {"key": "PORT", "label": "Web port", "type": "port", "default": "8096"},
+    {"key": "MEDIA", "label": "Media folder", "type": "folder", "default": "./media",
+     "hint": "A folder of your pool with your films and music, e.g. /tank/media; read only for Jellyfin."},
+    {"key": "USER", "label": "Run as", "type": "user", "uid": "PUID", "gid": "PGID",
+     "hint": "The account Jellyfin's files belong to; it needs to read the media folder."},
+    {"key": "TZ", "label": "Time zone", "type": "timezone"}
+  ],
+  "prepare": ["./config", "./cache"]
+}

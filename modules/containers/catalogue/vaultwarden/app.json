@@ -1,0 +1,15 @@
+{
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "description": "A password manager for the whole family that works with the Bitwarden apps and browser extensions.",
+  "website": "https://github.com/dani-garcia/vaultwarden",
+  "web": {"port": "PORT"},
+  "settings": [
+    {"key": "PORT", "label": "Web port", "type": "port", "default": "8222"},
+    {"key": "ADMIN_TOKEN", "label": "Admin page token", "type": "password", "show": true,
+     "hint": "Opens /admin, where users are invited and settings changed."},
+    {"key": "SIGNUPS", "label": "Anyone can sign up", "type": "choice", "choices": ["false", "true"], "default": "true"},
+    {"key": "TZ", "label": "Time zone", "type": "timezone"}
+  ],
+  "note": "Browsers open the web vault only over HTTPS (or on the NAS itself): put it behind a reverse proxy with a certificate before using it from other devices."
+}

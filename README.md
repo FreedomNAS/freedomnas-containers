@@ -34,7 +34,17 @@ later.
   brought up, down and updated (pull, then up) as jobs, and `reconcile()`
   brings up every app recorded as up whose containers are not all running,
   after Docker. A removed app's dataset is kept unless asked otherwise, and
-  a new app of the same name uses it again.
+  a new app of the same name uses it again. Compose files are checked with
+  `docker compose config` run with the app's dataset as project directory,
+  so its `.env` and relative paths are those it will run with.
+- **Catalogue**: ready-made apps (Home Assistant, Immich, Jellyfin,
+  Nextcloud, Pi-hole, Vaultwarden) in `modules/containers/catalogue/<id>/`,
+  each an `app.json` (settings and their types, see `catalogue.py`) and a
+  `compose.yaml` reading them as `${VARIABLES}`. Installing one creates an
+  ordinary app whose `.env` (0600) holds the settings; ports are checked
+  against what listens on the NAS (`ss`), what containers publish and the
+  ports of catalogue apps that are down; passwords are generated, shown
+  once, and kept when an app is installed again on its kept dataset.
 
 Configuration, `modules.containers` in `config.yaml`:
 
@@ -61,6 +71,8 @@ modules/containers/
 ├── runtime.py           the runtime: install, datasets, start after the pool, reconcile
 ├── docker.py            containers and images: list, actions, logs, pull, run, input checks
 ├── apps.py              Compose apps on their own datasets: create, edit, up/down, update, remove, reconcile
+├── catalogue.py         ready-made apps: defaults, checks, .env, folders
+├── catalogue/<id>/      app.json + compose.yaml for each ready-made app
 ├── api_routes.py        /api/containers/... (install, setup, pull and run run as jobs, one at a time)
 └── frontend/            containers.html, js/containers.js, icons.svg
 profiles/containers/
@@ -68,7 +80,8 @@ profiles/containers/
                          socket_units (systemd), runtime_repository (Debian),
                          ps, start/stop/restart, remove(_force), logs, images,
                          image_pull/_remove/_prune, run (run_args is a multi-argument),
-                         compose_check/_write/_up/_down/_pull/_logs
+                         compose_check/_write/_up/_down/_pull/_logs, env_write,
+                         folder_prepare, listening
 tests/                   pytest against the freedomnas-core checkout beside this one
 ```
 

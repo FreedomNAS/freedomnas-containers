@@ -7,5 +7,7 @@ freedomnas-module-containers (0.1.0-1) unstable; urgency=medium
     remove, download, prune, and run a container (Expert)
   * Apps: Docker Compose projects on datasets of their own, brought up
     again at boot
+  * Catalogue: Home Assistant, Immich, Jellyfin, Nextcloud, Pi-hole and
+    Vaultwarden, installed with checked settings and generated passwords
 
  -- FreedomNAS Team <dev@freedomnas.io>  Sun, 11 Oct 2026 01:17:27 +0000

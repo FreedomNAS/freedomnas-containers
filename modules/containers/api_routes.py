@@ -28,6 +28,12 @@ GET    /apps/{name}/logs?lines=N        — the last N lines of every container 
 DELETE /apps/{name}?destroy_data=true   — take it down and forget it; destroy_data also
                                           destroys its dataset
 
+GET    /catalogue                       — the ready-made apps
+GET    /catalogue/{id}                  — one of them, with its settings, their defaults
+                                          for this NAS and the accounts it can run as
+POST   /catalogue/{id}/install          — {name, values}: create it as an app and bring it
+                                          up (a job); answers with the values to show once
+
 Install, setup, pull and run can take minutes (a Gentoo install compiles
 Docker, an image download is as slow as the line), so they run in a thread,
 one at a time; /status reports how the last one went.
@@ -59,6 +65,7 @@ def _load(stem: str):
 runtime = _load("runtime")
 docker = _load("docker")
 apps = _load("apps")
+catalogue = _load("catalogue")
 router = APIRouter()
 
 _lock = threading.Lock()
@@ -117,7 +124,7 @@ async def setup(body: dict, username: str = Depends(authenticate)):
 
 
 def _failure(exc: Exception) -> JSONResponse:
-    if isinstance(exc, (docker.ContainerError, apps.AppError)):
+    if isinstance(exc, (docker.ContainerError, apps.AppError, catalogue.CatalogueError)):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
     return JSONResponse(status_code=500, content={"detail": docker.error_text(exc)})
 
@@ -254,3 +261,46 @@ async def app_logs(name: str, lines: int = 200, username: str = Depends(authenti
 async def remove_app(name: str, destroy_data: bool = False, username: str = Depends(authenticate)):
     result = await _call(apps.remove, runtime, get_engine(), get_config(), name, destroy_data)
     return result if isinstance(result, JSONResponse) else {"removed": name, "destroyed": destroy_data}
+
+
+@router.get("/catalogue")
+async def list_catalogue(username: str = Depends(authenticate)):
+    return {"entries": [catalogue.summary(item) for item in catalogue.entries()]}
+
+
+def _catalogue_entry(entry_id: str, username: str) -> dict:
+    item = catalogue.entry(entry_id)
+    engine, config = get_engine(), get_config()
+    taken = catalogue.used_ports(docker, engine, config=config)
+    installed = set(config.get_module_config("containers").get("apps") or {})
+    name = item["id"]
+    n = 2
+    while name in installed:
+        name, n = f"{item['id']}{n}", n + 1
+    return {**catalogue.summary(item), "app_name": name,
+            "defaults": catalogue.defaults(item, config, username, taken),
+            "users": catalogue._accounts(config)}
+
+
+@router.get("/catalogue/{entry_id}")
+async def get_catalogue_entry(entry_id: str, username: str = Depends(authenticate)):
+    return await _call(_catalogue_entry, entry_id, username)
+
+
+@router.post("/catalogue/{entry_id}/install")
+async def install_from_catalogue(entry_id: str, body: dict, username: str = Depends(authenticate)):
+    engine, config = get_engine(), get_config()
+    name = str(body.get("name") or entry_id).strip()
+    values = body.get("values")
+    if values is None:
+        defaults = await _call(_catalogue_entry, entry_id, username)
+        if isinstance(defaults, JSONResponse):
+            return defaults
+        values = defaults["defaults"]
+    result = await _call(catalogue.install, runtime, apps, docker, engine, config, entry_id, name, values)
+    if isinstance(result, JSONResponse):
+        return result
+    job = _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+    if isinstance(job, JSONResponse):
+        return job
+    return {**result, **job}

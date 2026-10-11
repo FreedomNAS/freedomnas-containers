@@ -11,6 +11,8 @@ Configuration, under `modules.containers.apps`:
     <name>:
       dataset  str  <pool>/apps/<name>
       state    str  "up" (brought up again at boot) or "down"
+      catalogue, web_port, ports   for apps installed from the catalogue: the
+                                   ports stay taken while the app is down
 
 The compose file itself is on the pool, not in config.yaml. A removed app
 whose dataset was kept is picked up again by a new app of the same name,
@@ -30,11 +32,13 @@ except ImportError:
 
 CATEGORY = "containers"
 COMPOSE_FILE = "compose.yaml"
+ENV_FILE = ".env"
 STATES = ("up", "down")
 UP_TIMEOUT = 3600
 MAX_COMPOSE = 256 * 1024
 
 _APP = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+
 
 
 class AppError(Exception):
@@ -87,13 +91,21 @@ def compose_file(runtime, engine, dataset: str) -> str:
     return str(Path(_mountpoint(runtime, engine, dataset)) / COMPOSE_FILE)
 
 
-def validate(engine, text: str) -> None:
+def check_size(text: str) -> None:
     if not isinstance(text, str) or not text.strip():
         raise AppError("The compose file is empty")
     if len(text.encode()) > MAX_COMPOSE:
         raise AppError("The compose file is larger than 256 KiB")
+
+
+def validate(engine, text: str, directory: str) -> None:
+    """
+    Check a compose file with Docker Compose as if it were in `directory`,
+    the app's dataset: its .env and relative paths are read from there.
+    """
+    check_size(text)
     try:
-        engine.execute_with_stdin(CATEGORY, "compose_check", text, timeout=60)
+        engine.execute_with_stdin(CATEGORY, "compose_check", text, timeout=60, dir=directory)
     except Exception as exc:
         raise AppError(f"The compose file is not valid: {_stderr(exc)}")
 
@@ -123,7 +135,9 @@ def listing(runtime, docker, engine, config) -> List[Dict[str, Any]]:
             "state": app.get("state", "down"),
             "containers": len(own),
             "running": running,
-            "ports": ", ".join(c["ports"] for c in own if c["ports"]),
+            "ports": docker.short_ports(", ".join(c["published"] for c in own if c["published"])),
+            "catalogue": app.get("catalogue"),
+            "web_port": app.get("web_port"),
         })
     return result
 
@@ -137,24 +151,34 @@ def read(runtime, engine, config, name: str) -> Dict[str, Any]:
             "compose": file.read_text() if file.exists() else ""}
 
 
-def create(runtime, engine, config, name: str, text: str) -> None:
+def create(runtime, engine, config, name: str, text: str, extra: Optional[Dict[str, Any]] = None,
+           env_text: Optional[str] = None) -> None:
+    """
+    Create the app's dataset (or take a kept one) with its compose file,
+    checked in the dataset; env_text, when given, is written first as its
+    .env (0600). A dataset created here is destroyed again on failure.
+    """
     check_name(name)
     if name in _apps(config):
         raise AppError(f"An app named '{name}' already exists")
     pool = _pool(config)
-    validate(engine, text)
+    check_size(text)
     dataset = dataset_for(pool, name)
     reused = runtime.dataset_state(engine, dataset)["exists"]
     if not reused:
         engine.execute("zfs", "dataset_create_with", options="-p", dataset=dataset)
     try:
-        engine.execute_with_stdin(CATEGORY, "compose_write", text, file=compose_file(runtime, engine, dataset))
+        file = compose_file(runtime, engine, dataset)
+        if env_text is not None:
+            engine.execute_with_stdin(CATEGORY, "env_write", env_text, file=str(Path(file).with_name(ENV_FILE)))
+        validate(engine, text, str(Path(file).parent))
+        engine.execute_with_stdin(CATEGORY, "compose_write", text, file=file)
     except Exception:
         if not reused:
             engine.execute("zfs", "dataset_destroy_recursive", timeout=300, dataset=dataset)
         raise
     apps = _apps(config)
-    apps[name] = {"dataset": dataset, "state": "down"}
+    apps[name] = {**(extra or {}), "dataset": dataset, "state": "down"}
     _save(config, apps)
 
 
@@ -162,8 +186,9 @@ def update(runtime, engine, config, name: str, text: str) -> None:
     app = _apps(config).get(check_name(name))
     if not app:
         raise AppError(f"No app '{name}'")
-    validate(engine, text)
-    engine.execute_with_stdin(CATEGORY, "compose_write", text, file=compose_file(runtime, engine, app["dataset"]))
+    file = compose_file(runtime, engine, app["dataset"])
+    validate(engine, text, str(Path(file).parent))
+    engine.execute_with_stdin(CATEGORY, "compose_write", text, file=file)
 
 
 def set_state(runtime, engine, config, name: str, state: str) -> None:

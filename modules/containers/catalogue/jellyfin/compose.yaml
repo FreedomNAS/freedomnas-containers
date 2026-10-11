@@ -1,0 +1,13 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    user: "${PUID}:${PGID}"
+    ports:
+      - "${PORT}:8096"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - ${MEDIA}:/media:ro
+    environment:
+      TZ: ${TZ}
+    restart: unless-stopped
