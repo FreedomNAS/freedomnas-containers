@@ -20,6 +20,7 @@ from freedomnas.package_manager import PackageManager  # noqa: E402
 sys.path.insert(0, str(REPO / "modules" / "containers"))
 import runtime  # noqa: E402
 import docker  # noqa: E402
+import jails  # noqa: E402
 import apps  # noqa: E402
 import catalogue  # noqa: E402
 

@@ -6,7 +6,7 @@
 <div class="page-header">
   <div class="page-header-text">
     <h1>Containers</h1>
-    <p>Docker, with its containers, images and volumes on datasets of your pool</p>
+    <p><span class="rt-name">Docker</span>, with its containers, images and volumes on datasets of your pool</p>
   </div>
 </div>
 
@@ -24,9 +24,9 @@
 
 <div class="section advanced-only" id="install-section" hidden>
   <div class="card">
-    <div class="card-title" style="margin-bottom:10px">Install Docker</div>
-    <p class="text-muted">Docker is installed from your edition's own packages. It can take a few minutes, on Gentoo much longer: it is compiled.</p>
-    <button class="btn btn-primary" id="btn-install">Install Docker</button>
+    <div class="card-title" style="margin-bottom:10px">Install <span class="rt-name">Docker</span></div>
+    <p class="text-muted"><span class="rt-name">Docker</span> is installed from your edition's own packages. It can take a few minutes, on Gentoo much longer: it is compiled.</p>
+    <button class="btn btn-primary" id="btn-install">Install <span class="rt-name">Docker</span></button>
   </div>
 </div>
 
@@ -34,9 +34,9 @@
   <div class="card">
     <div class="card-title" style="margin-bottom:10px">Where containers live</div>
     <p class="text-muted">
-      Containers, images and volumes go on the datasets <span class="font-mono">&lt;pool&gt;/containers/docker</span>
-      and <span class="font-mono">&lt;pool&gt;/containers/containerd</span>, outside the system: a rollback of the system
-      leaves them alone, and the pool's snapshots and replication take them along. What Docker already holds is copied there.
+      Containers, images and volumes go on datasets under <span class="font-mono">&lt;pool&gt;/containers</span>,
+      outside the system: a rollback of the system leaves them alone, and the pool's snapshots and replication take them
+      along. What <span class="rt-name">Docker</span> already holds is copied there.
     </p>
     <div class="form-group">
       <label for="f-pool">Pool</label>
@@ -144,13 +144,14 @@
         <div class="form-group">
           <label for="f-run-name">Name</label>
           <input id="f-run-name" class="input" placeholder="web">
+          <span class="form-hint jail-only">A jail always needs a name: letters, digits, - and _.</span>
         </div>
         <div class="form-group">
-          <label for="f-run-ports">Ports, one per line (host:container)</label>
+          <label for="f-run-ports">Ports, one per line (host:<span class="docker-only">container</span><span class="jail-only">jail</span>)</label>
           <textarea id="f-run-ports" class="textarea font-mono" rows="2" placeholder="8081:80"></textarea>
         </div>
         <div class="form-group">
-          <label for="f-run-volumes">Volumes, one per line (volume or /path : /path in the container)</label>
+          <label for="f-run-volumes"><span class="docker-only">Volumes, one per line (volume or /path : /path in the container)</span><span class="jail-only">Folders, one per line (/path of the pool : /path in the jail)</span></label>
           <textarea id="f-run-volumes" class="textarea font-mono" rows="2" placeholder="webdata:/usr/share/nginx/html"></textarea>
         </div>
         <div class="form-group">
@@ -166,7 +167,8 @@
             <option value="no">no</option>
           </select>
         </div>
-        <span class="form-hint">A named volume lives on the containers dataset. A path like /tank/media mounts a directory of your pool.</span>
+        <span class="form-hint docker-only">A named volume lives on the containers dataset. A path like /tank/media mounts a directory of your pool.</span>
+        <span class="form-hint jail-only">A jail mounts folders only: a path like /tank/media, then the path in the jail. Ports are host:jail, with /udp for UDP; the jail sits on its own network behind NAT.</span>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-close>Cancel</button>

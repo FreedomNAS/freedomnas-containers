@@ -254,6 +254,8 @@ def place(engine, dataset: str, path: str) -> List[str]:
 def status(engine, config) -> Dict[str, Any]:
     section = config.get_module_config(MODULE_ID)
     result: Dict[str, Any] = {
+        "runtime": runtime_name(engine),
+        "backend": backend(engine),
         "installed": installed(engine),
         "configured": bool(section.get("enabled")),
         "pool": section.get("pool"),

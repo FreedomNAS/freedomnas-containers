@@ -44,9 +44,10 @@ async function loadStatus() {
   render();
   const job = _status.job || {};
   const ready = _status.installed && _status.running && !!_status.version;
-  document.getElementById('apps-section').hidden = !ready;
-  document.getElementById('catalogue-section').hidden = !ready;
-  if (ready && !_catalogue) loadCatalogue();
+  const composeApps = _status.backend !== 'appjail';
+  document.getElementById('apps-section').hidden = !ready || !composeApps;
+  document.getElementById('catalogue-section').hidden = !ready || !composeApps;
+  if (ready && composeApps && !_catalogue) loadCatalogue();
   document.getElementById('containers-section').hidden = !ready;
   document.getElementById('images-section').hidden = !ready;
   const jobKey = `${job.kind}:${job.state}:${job.finished}`;
@@ -70,7 +71,20 @@ function render() {
     state = `<span class="badge badge-ok">Running on ${esc(s.pool)}</span>`;
   else state = '<span class="badge badge-err">Not running</span>';
 
-  const rows = [row('Docker', state)];
+  const rt = s.runtime || 'Docker';
+  document.querySelectorAll('.rt-name').forEach(e => { e.textContent = rt; });
+  const jail = s.backend === 'appjail';
+  document.querySelectorAll('.jail-only').forEach(e => { e.hidden = !jail; });
+  document.querySelectorAll('.docker-only').forEach(e => { e.hidden = jail; });
+  document.getElementById('f-run-name').required = jail;
+  const hints = jail
+    ? {image: 'ghcr.io/appjail-makejails/nginx:latest', ports: '8081:80', volumes: '/tank/web:/usr/local/www'}
+    : {image: 'nginx:alpine', ports: '8081:80', volumes: 'webdata:/usr/share/nginx/html'};
+  document.getElementById('f-run-image').placeholder = hints.image;
+  document.getElementById('f-run-ports').placeholder = hints.ports;
+  document.getElementById('f-run-volumes').placeholder = hints.volumes;
+  document.getElementById('f-pull-image').placeholder = `Image to download, e.g. ${hints.image}`;
+  const rows = [row(esc(rt), state)];
   if (s.version) rows.push(row('Version', esc(s.version)));
   for (const d of s.datasets || []) {
     const mounted = d.mounted ? '' : ' <span class="badge badge-err">Not mounted</span>';
@@ -84,10 +98,10 @@ function render() {
 
   const job = s.job || {};
   const line = document.getElementById('job-line');
-  const running = {install: 'Installing Docker…', setup: 'Setting up the datasets and starting Docker…',
+  const running = {install: `Installing ${rt}…`, setup: `Setting up the datasets and starting ${rt}…`,
                    pull: 'Downloading the image…', run: 'Starting the container (downloading its image if needed)…',
                    app: 'Working on the app (downloading its images if needed)…'};
-  const done = {install: 'Docker installed.', setup: `Docker now keeps its data on ${s.pool}.`,
+  const done = {install: `${rt} installed.`, setup: `${rt} now keeps its data on ${s.pool}.`,
                 pull: 'Image downloaded.', run: 'Container started.', app: 'App done.'};
   if (job.state === 'running') line.textContent = running[job.kind] || 'Working…';
   else if (job.state === 'failed') line.textContent = `The ${job.kind} failed: ${job.error}`;
@@ -123,7 +137,7 @@ async function setupRuntime() {
   const pool = document.getElementById('f-pool').value;
   if (!pool) return;
   if (!await confirm('Set up containers',
-      `Docker stops while its data is put on ${pool}/containers, then starts again. Running containers stop for that time.`,
+      `${(_status && _status.runtime) || 'Docker'} stops while its data is put on ${pool}/containers, then starts again. Running containers stop for that time.`,
       'Continue')) return;
   const btn = document.getElementById('btn-setup');
   setLoading(btn, true, 'Starting…');
@@ -137,7 +151,8 @@ async function setupRuntime() {
 }
 
 async function loadLists() {
-  await Promise.all([loadApps(), loadContainers(), loadImages()]);
+  const composeApps = !_status || _status.backend !== 'appjail';
+  await Promise.all([composeApps ? loadApps() : null, loadContainers(), loadImages()]);
 }
 
 let _apps = [];

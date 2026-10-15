@@ -64,12 +64,18 @@ def _load(stem: str):
 
 runtime = _load("runtime")
 docker = _load("docker")
+jails = _load("jails")
 apps = _load("apps")
 catalogue = _load("catalogue")
 router = APIRouter()
 
 _lock = threading.Lock()
 _job: dict = {"kind": None, "state": "idle", "error": None, "started": None, "finished": None}
+
+
+def _rt(engine):
+    """The containers backend of this edition: docker.py, or jails.py for AppJail."""
+    return jails if runtime.backend(engine) == "appjail" else docker
 
 
 def _now() -> str:
@@ -82,7 +88,7 @@ def _run(kind: str, work) -> None:
         _job.update(state="done", error=None)
     except Exception as exc:
         runtime.logger.error("Containers %s failed: %s", kind, exc)
-        _job.update(state="failed", error=docker.error_text(exc))
+        _job.update(state="failed", error=_rt(get_engine()).error_text(exc))
     finally:
         _job["finished"] = _now()
 
@@ -107,7 +113,7 @@ async def status(username: str = Depends(authenticate)):
 async def install(username: str = Depends(authenticate)):
     engine = get_engine()
     if await asyncio.to_thread(runtime.installed, engine):
-        return JSONResponse(status_code=409, content={"detail": "Docker is already installed"})
+        return JSONResponse(status_code=409, content={"detail": f"{runtime.runtime_name(engine)} is already installed"})
     return _start_job("install", lambda: runtime.install(engine))
 
 
@@ -124,9 +130,9 @@ async def setup(body: dict, username: str = Depends(authenticate)):
 
 
 def _failure(exc: Exception) -> JSONResponse:
-    if isinstance(exc, (docker.ContainerError, apps.AppError, catalogue.CatalogueError)):
+    if isinstance(exc, (docker.ContainerError, jails.ContainerError, apps.AppError, catalogue.CatalogueError)):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
-    return JSONResponse(status_code=500, content={"detail": docker.error_text(exc)})
+    return JSONResponse(status_code=500, content={"detail": _rt(get_engine()).error_text(exc)})
 
 
 async def _call(func, *args):
@@ -138,65 +144,74 @@ async def _call(func, *args):
 
 @router.get("/containers")
 async def list_containers(username: str = Depends(authenticate)):
-    result = await _call(docker.containers, get_engine())
+    engine = get_engine()
+    result = await _call(_rt(engine).containers, engine)
     return result if isinstance(result, JSONResponse) else {"containers": result}
 
 
 @router.post("/containers/run")
 async def run_container(body: dict, username: str = Depends(authenticate)):
-    try:
-        docker.check_image(body.get("image") or "")
-        docker.run_args(body)
-    except docker.ContainerError as exc:
-        return _failure(exc)
     engine = get_engine()
-    return _start_job("run", lambda: docker.run(engine, body))
+    rt = _rt(engine)
+    try:
+        rt.check_image(body.get("image") or "")
+        rt.run_args(body)
+    except rt.ContainerError as exc:
+        return _failure(exc)
+    return _start_job("run", lambda: rt.run(engine, body))
 
 
 @router.post("/containers/{name}/{action}")
 async def container_action(name: str, action: str, username: str = Depends(authenticate)):
-    result = await _call(docker.act, get_engine(), name, action)
+    engine = get_engine()
+    result = await _call(_rt(engine).act, engine, name, action)
     return result if isinstance(result, JSONResponse) else {"name": name, "action": action}
 
 
 @router.delete("/containers/{name}")
 async def remove_container(name: str, force: bool = False, username: str = Depends(authenticate)):
-    result = await _call(docker.remove, get_engine(), name, force)
+    engine = get_engine()
+    result = await _call(_rt(engine).remove, engine, name, force)
     return result if isinstance(result, JSONResponse) else {"removed": name}
 
 
 @router.get("/containers/{name}/logs")
 async def container_logs(name: str, lines: int = docker.LOG_LINES, username: str = Depends(authenticate)):
-    result = await _call(docker.logs, get_engine(), name, lines)
+    engine = get_engine()
+    result = await _call(_rt(engine).logs, engine, name, lines)
     return result if isinstance(result, JSONResponse) else {"name": name, "logs": result}
 
 
 @router.get("/images")
 async def list_images(username: str = Depends(authenticate)):
-    result = await _call(docker.images, get_engine())
+    engine = get_engine()
+    result = await _call(_rt(engine).images, engine)
     return result if isinstance(result, JSONResponse) else {"images": result}
 
 
 @router.post("/images/pull")
 async def pull_image(body: dict, username: str = Depends(authenticate)):
     image = str(body.get("image") or "").strip()
-    try:
-        docker.check_image(image)
-    except docker.ContainerError as exc:
-        return _failure(exc)
     engine = get_engine()
-    return _start_job("pull", lambda: docker.pull(engine, image))
+    rt = _rt(engine)
+    try:
+        rt.check_image(image)
+    except rt.ContainerError as exc:
+        return _failure(exc)
+    return _start_job("pull", lambda: rt.pull(engine, image))
 
 
 @router.post("/images/prune")
 async def prune_images(username: str = Depends(authenticate)):
-    result = await _call(docker.prune_images, get_engine())
+    engine = get_engine()
+    result = await _call(_rt(engine).prune_images, engine)
     return result if isinstance(result, JSONResponse) else {"output": result}
 
 
 @router.delete("/images/{image:path}")
 async def remove_image(image: str, username: str = Depends(authenticate)):
-    result = await _call(docker.remove_image, get_engine(), image)
+    engine = get_engine()
+    result = await _call(_rt(engine).remove_image, engine, image)
     return result if isinstance(result, JSONResponse) else {"removed": image}
 
 

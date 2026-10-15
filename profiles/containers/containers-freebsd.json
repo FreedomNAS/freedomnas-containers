@@ -1,8 +1,11 @@
 {
   "containers": {
-    "_note": "AppJail for the containers module on FreeBSD. Package names and services come from freedomnas-profiles' packages/containers.json; this file holds only what the module runs itself. backend appjail: jails, releases, networks and logs live in AppJail's root /usr/local/appjail, OCI images in buildah's /var/db/containers; each is mounted from <pool>/containers/<name> (canmount=on), outside the root dataset, so neither grows the system nor goes back with its rollback. appjail.conf points AppJail's ZFS root at the same dataset, storage.conf points buildah's zfs driver at the oci one: without it every image layer becomes a dataset under the root. AppJail's services stay enabled at boot (the NAT of the jails' network comes from appjail-natnet; the pool is imported and mounted before services start); running means pf is enabled, AppJail has no daemon. pf carries AppJail's NAT and expose anchors in a block of /etc/pf.conf between # freedomnas appjail begin/end; the rest of the file is left as it is.",
+    "_note": "AppJail for the containers module on FreeBSD. Package names and services come from freedomnas-profiles' packages/containers.json; this file holds only what the module runs itself. backend appjail: jails, releases, networks and logs live in AppJail's root /usr/local/appjail, OCI images in buildah's /var/db/containers; each is mounted from <pool>/containers/<name> (canmount=on), outside the root dataset, so neither grows the system nor goes back with its rollback. appjail.conf points AppJail's ZFS root at the same dataset, storage.conf points buildah's zfs driver at the oci one: without it every image layer becomes a dataset under the root. AppJail's services stay enabled at boot (the NAT of the jails' network comes from appjail-natnet; the pool is imported and mounted before services start); running means pf is enabled, AppJail has no daemon. pf carries AppJail's NAT and expose anchors in a block of /etc/pf.conf between # freedomnas appjail begin/end; the rest of the file is left as it is. Containers are jails: ps lists them tab-separated (appjail jail list -eHIp), images come from buildah; run reads its words NUL-separated on stdin (xargs -0), because AppJail's options hold spaces (fstab=src dst).",
     "backend": "appjail",
-    "data_dirs": {"appjail": "/usr/local/appjail", "oci": "/var/db/containers"},
+    "data_dirs": {
+      "appjail": "/usr/local/appjail",
+      "oci": "/var/db/containers"
+    },
     "runtime_check": "appjail version",
     "running_check": "sh -c 'pfctl -s info | grep -q \"Status: Enabled\"'",
     "info": "appjail version",
@@ -24,6 +27,25 @@
     "appjail_conf": "/usr/local/etc/appjail/appjail.conf",
     "storage_conf": "/usr/local/etc/containers/storage.conf",
     "pf_conf": "/etc/pf.conf",
-    "jail_network": {"name": "fnasjails", "network": "10.231.0.0/24"}
+    "jail_network": {
+      "name": "fnasjails",
+      "network": "10.231.0.0/24"
+    },
+    "ps": "appjail jail list -eHIp name status type version ports network_ip4 container_image created boot is_container",
+    "images": "buildah images --json",
+    "start": "appjail start {container}",
+    "stop": "appjail stop {container}",
+    "restart": "appjail restart {container}",
+    "remove": "appjail jail destroy {container}",
+    "remove_force": "sh -c 'appjail stop \"$1\" >/dev/null 2>&1; appjail jail destroy \"$1\"' remove_force {container}",
+    "log_list": "appjail logs",
+    "log_read": "sh -c 'appjail logs read \"$1\" | tail -n \"$2\"' log_read {path} {lines}",
+    "image_pull": "buildah pull {image}",
+    "image_remove": "buildah rmi {image}",
+    "image_prune": "buildah rmi --prune",
+    "run": "xargs -0 appjail oci run -Pd",
+    "boot_off": "appjail jail boot off {container}",
+    "oci_template": "/usr/local/share/examples/appjail/templates/freebsd-oci.conf",
+    "listening": "sockstat -46l"
   }
 }

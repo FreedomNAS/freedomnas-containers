@@ -8,7 +8,10 @@ FreedomNAS documentation.
 Docker runs from the edition's own packages, on every Linux edition
 (Debian, Arch, Artix, Void, Gentoo). On FreeBSD the runtime is AppJail
 (`backend: appjail` in containers-freebsd.json, appjail_runtime.py): the
-runtime and its datasets are done; jails, apps and the catalogue follow.
+runtime and its datasets are done, and containers are jails (jails.py,
+the twin of docker.py: AppJail's tab-separated listing, buildah's images,
+`oci run` words NUL-separated through `xargs -0`); apps and the catalogue
+follow.
 
 ## What it does
 
