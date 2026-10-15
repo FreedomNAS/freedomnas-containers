@@ -1,0 +1,29 @@
+{
+  "containers": {
+    "_note": "AppJail for the containers module on FreeBSD. Package names and services come from freedomnas-profiles' packages/containers.json; this file holds only what the module runs itself. backend appjail: jails, releases, networks and logs live in AppJail's root /usr/local/appjail, OCI images in buildah's /var/db/containers; each is mounted from <pool>/containers/<name> (canmount=on), outside the root dataset, so neither grows the system nor goes back with its rollback. appjail.conf points AppJail's ZFS root at the same dataset, storage.conf points buildah's zfs driver at the oci one: without it every image layer becomes a dataset under the root. AppJail's services stay enabled at boot (the NAT of the jails' network comes from appjail-natnet; the pool is imported and mounted before services start); running means pf is enabled, AppJail has no daemon. pf carries AppJail's NAT and expose anchors in a block of /etc/pf.conf between # freedomnas appjail begin/end; the rest of the file is left as it is.",
+    "backend": "appjail",
+    "data_dirs": {"appjail": "/usr/local/appjail", "oci": "/var/db/containers"},
+    "runtime_check": "appjail version",
+    "running_check": "sh -c 'pfctl -s info | grep -q \"Status: Enabled\"'",
+    "info": "appjail version",
+    "data_copy": "cp -a {source}/. {target}/",
+    "data_move": "mv {source} {target}",
+    "default_route": "route -n get default",
+    "system_version": "freebsd-version -u",
+    "system_arch": "uname -m",
+    "file_read": "cat {file}",
+    "file_write": "sh -c 'umask 022 && cat > \"$1\"' file_write {file}",
+    "sysrc_set": "sysrc {setting}",
+    "sysctl_set": "sysctl {setting}",
+    "kmod_load": "kldload -n {module}",
+    "pf_load": "pfctl -f /etc/pf.conf",
+    "network_list": "appjail network list -eHIp name network",
+    "network_add": "appjail network add {name} {network}",
+    "release_check": "test -d /usr/local/appjail/releases/{arch}/{version}/default/release",
+    "release_fetch": "appjail fetch",
+    "appjail_conf": "/usr/local/etc/appjail/appjail.conf",
+    "storage_conf": "/usr/local/etc/containers/storage.conf",
+    "pf_conf": "/etc/pf.conf",
+    "jail_network": {"name": "fnasjails", "network": "10.231.0.0/24"}
+  }
+}

@@ -3,14 +3,15 @@
   "name": "Containers",
   "version": "0.1.0",
   "type": "community",
-  "description": "Docker with its containers and images on a ZFS dataset of a chosen pool",
+  "description": "Docker on Linux, AppJail on FreeBSD, with containers and images on ZFS datasets of a chosen pool",
   "entry_point": "module:ContainersModule",
   "supported_os": [
     "debian",
     "arch",
     "artix",
     "void",
-    "gentoo"
+    "gentoo",
+    "freebsd"
   ],
   "depends_on": [],
   "webui": {

@@ -27,8 +27,10 @@ Configuration, `modules.containers`:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -41,6 +43,19 @@ except ImportError:
     from engine import CommandExecutionError, CommandTranslationError  # type: ignore[no-redef]
     from package_manager import PackageManager  # type: ignore[no-redef]
     from reconcile import ActionResult  # type: ignore[no-redef]
+
+
+def _load(stem: str):
+    name = f"freedomnas_containers_{stem}"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{stem}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+appjail_runtime = _load("appjail_runtime")
 
 logger = logging.getLogger("FreedomNAS.Module.Containers")
 
@@ -61,6 +76,14 @@ def _value(engine, key: str, default: Any = None) -> Any:
         return engine.get_profile_value(CATEGORY, key)
     except CommandTranslationError:
         return default
+
+
+def backend(engine) -> str:
+    return _value(engine, "backend", "docker")
+
+
+def runtime_name(engine) -> str:
+    return "AppJail" if backend(engine) == "appjail" else "Docker"
 
 
 def data_dirs(engine) -> Dict[str, str]:
@@ -111,6 +134,12 @@ def dataset_state(engine, dataset: str) -> Dict[str, Any]:
 
 
 def running(engine) -> bool:
+    if backend(engine) == "appjail":
+        try:
+            engine.execute(CATEGORY, "running_check")
+            return True
+        except ENGINE_ERRORS:
+            return False
     for name in services(engine):
         try:
             out, _ = engine.execute("services", "is_running", check=False, service_name=name)
@@ -122,6 +151,13 @@ def running(engine) -> bool:
 
 
 def info(engine) -> Optional[Dict[str, Any]]:
+    if backend(engine) == "appjail":
+        try:
+            out, _ = engine.execute(CATEGORY, "info")
+        except ENGINE_ERRORS:
+            return None
+        return {"DockerRootDir": data_dirs(engine).get("appjail"), "Driver": "zfs",
+                "ServerVersion": out.strip()}
     try:
         out, _ = engine.execute(CATEGORY, "info")
         data = json.loads(out)
@@ -137,8 +173,14 @@ def _boot_units(engine) -> List[str]:
 
 
 def keep_from_boot(engine) -> None:
+    """
+    Docker waits for the reconciler, which mounts its datasets first.
+    AppJail's services stay enabled: the jails' NAT is set up at boot, and
+    the pool is imported and mounted before any service starts.
+    """
+    action = "enable" if backend(engine) == "appjail" else "disable"
     for name in _boot_units(engine):
-        engine.execute("services", "disable", check=False, service_name=name)
+        engine.execute("services", action, check=False, service_name=name)
 
 
 def stop(engine) -> None:
@@ -152,7 +194,7 @@ def start(engine) -> None:
     deadline = time.monotonic() + START_WAIT
     while info(engine) is None:
         if time.monotonic() > deadline:
-            raise ContainersError("Docker did not answer after it was started")
+            raise ContainersError(f"{runtime_name(engine)} did not answer after it was started")
         time.sleep(1)
 
 
@@ -173,7 +215,9 @@ def mount_at_boot(engine, dataset: str) -> List[str]:
 def place(engine, dataset: str, path: str) -> List[str]:
     """
     Mount `dataset` on `path`, creating it when missing; whatever `path`
-    held on the root dataset is moved aside first and copied onto it.
+    held on the root dataset is moved aside first and copied onto it. A new
+    dataset is created unmounted (FreeBSD would mount it at once, over what
+    the directory holds) and gets canmount=on once it is in place.
     Returns what was done. Docker must be stopped.
     """
     done: List[str] = []
@@ -184,7 +228,7 @@ def place(engine, dataset: str, path: str) -> List[str]:
         return done + mount_at_boot(engine, dataset)
     if not state["exists"]:
         engine.execute("zfs", "dataset_create_with",
-                       options=f"-p -o mountpoint={path}", dataset=dataset)
+                       options=f"-p -o canmount=noauto -o mountpoint={path}", dataset=dataset)
         done.append("created")
     elif state["mountpoint"] != path:
         raise ContainersError(f"{dataset} belongs on {state['mountpoint']}, not {path}")
@@ -204,7 +248,7 @@ def place(engine, dataset: str, path: str) -> List[str]:
     if aside and not _has_entries(path):
         engine.execute(CATEGORY, "data_copy", timeout=7200, source=aside, target=path)
         done.append("copied")
-    return done
+    return done + mount_at_boot(engine, dataset)
 
 
 def status(engine, config) -> Dict[str, Any]:
@@ -250,12 +294,12 @@ def install(engine) -> None:
     for name in packages(engine):
         engine.execute("packages", "install", timeout=7200, package_name=name)
     if not installed(engine):
-        raise ContainersError("Docker is still missing after the installation")
+        raise ContainersError(f"{runtime_name(engine)} is still missing after the installation")
 
 
 def setup(engine, config, pool: str) -> Dict[str, Any]:
     if not installed(engine):
-        raise ContainersError("Docker is not installed")
+        raise ContainersError(f"{runtime_name(engine)} is not installed")
     current = config.get_module_config(MODULE_ID)
     if current.get("enabled") and current.get("pool") != pool:
         raise ContainersError(f"Containers already live on {current.get('pool')}")
@@ -269,6 +313,8 @@ def setup(engine, config, pool: str) -> Dict[str, Any]:
     dirs = data_dirs(engine)
     for name, dataset in datasets.items():
         place(engine, dataset, dirs[name])
+    if backend(engine) == "appjail":
+        appjail_runtime.configure(engine, pool, datasets, dirs)
     keep_from_boot(engine)
     start(engine)
 
@@ -287,7 +333,7 @@ def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative") -> Lis
     if not desired.get("enabled") or not datasets:
         return []
     if not installed(engine):
-        return [_result("runtime", "Docker is not installed: install it from the Containers page")]
+        return [_result("runtime", f"{runtime_name(engine)} is not installed: install it from the Containers page")]
     pool = desired.get("pool") or next(iter(datasets.values())).split("/")[0]
     try:
         if pool not in pool_names(engine):
@@ -311,6 +357,10 @@ def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative") -> Lis
                 continue
             done = place(engine, datasets[name], dirs[name])
             results.append(_result("dataset", dataset=datasets[name], path=dirs[name], done=", ".join(done)))
+        if backend(engine) == "appjail":
+            done = appjail_runtime.configure(engine, pool, datasets, dirs)
+            if done:
+                results.append(_result("configure", done=", ".join(done)))
         keep_from_boot(engine)
         if not running(engine) or info(engine) is None:
             start(engine)

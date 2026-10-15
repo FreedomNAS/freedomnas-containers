@@ -137,7 +137,7 @@ def test_reconcile_mounts_the_datasets_then_starts_docker(engine):
 def test_reconcile_on_a_new_pool_creates_empty_datasets(engine):
     results = runtime.reconcile(engine, DESIRED)
     assert [r.action for r in results] == ["containers.dataset", "containers.dataset", "containers.start"]
-    assert results[0].params["done"] == "created, mounted"
+    assert results[0].params["done"] == "created, mounted, canmount=on"
 
 
 def test_reconcile_moves_aside_what_docker_wrote_on_the_root(engine):
