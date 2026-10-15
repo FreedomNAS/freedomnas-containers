@@ -1,18 +1,17 @@
 """
-The container runtime: Docker installed from the edition's packages, with
-the directories it keeps its data in (`data_dirs` in the profile:
-/var/lib/docker and /var/lib/containerd on Linux) mounted from ZFS datasets
-of a chosen pool, `<pool>/containers/<name>`. They sit outside the root
-dataset, so containers and images survive a rollback of the system and go
-along with the pool's snapshots and replication; Docker's own
-configuration is left as it is, whichever image store it uses.
+The container runtime: installed from the edition's packages, with the
+directories it keeps its data in (`data_dirs` in the profile, e.g.
+/var/lib/docker and /var/lib/containerd for Docker) mounted from ZFS
+datasets of a chosen pool, `<pool>/containers/<name>`. They sit outside the
+root dataset, so containers and images survive a rollback of the system and
+go along with the pool's snapshots and replication.
 
 The datasets are `canmount=on`, so a pool imported at boot gets them
-mounted by the system's own ZFS mount service before any service starts,
-also when something that needs Docker (a CI runner, say) starts it early.
-Docker is still kept from starting at boot by itself: a pool imported
-only by the reconciler has its datasets mounted by the module's
-reconcile(), which then starts Docker.
+mounted by the system's own ZFS mount service before any service starts.
+Whether the runtime's services start at boot by themselves or wait for the
+module's reconcile() is the profile's `boot_services`; what the host needs
+besides (configuration files, firewall, networks) is its `config_files`,
+`configure` and `configure_services`, applied at setup and at every boot.
 
 What a directory held before setup is moved aside to `<dir>.pre-freedomnas`
 (or `<dir>.pre-freedomnas-<date>` when that exists already) and copied
@@ -28,8 +27,8 @@ Configuration, `modules.containers`:
 from __future__ import annotations
 
 import importlib.util
-import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -55,7 +54,7 @@ def _load(stem: str):
     return sys.modules[name]
 
 
-appjail_runtime = _load("appjail_runtime")
+records = _load("records")
 
 logger = logging.getLogger("FreedomNAS.Module.Containers")
 
@@ -79,11 +78,15 @@ def _value(engine, key: str, default: Any = None) -> Any:
 
 
 def backend(engine) -> str:
-    return _value(engine, "backend", "docker")
+    return _value(engine, "backend", "")
 
 
 def runtime_name(engine) -> str:
-    return "AppJail" if backend(engine) == "appjail" else "Docker"
+    return _value(engine, "runtime_name", "The container runtime")
+
+
+def ui(engine) -> Dict[str, Any]:
+    return dict(_value(engine, "ui", {}))
 
 
 def data_dirs(engine) -> Dict[str, str]:
@@ -96,7 +99,11 @@ def datasets_for(engine, pool: str) -> Dict[str, str]:
 
 def services(engine) -> List[str]:
     names = PackageManager().get_services_for_os(PACKAGES, engine.os_type, engine.init_system)
-    return sorted(names, key=lambda name: 0 if "containerd" in name else 1)
+    order = list(_value(engine, "services_order", []))
+
+    def rank(name: str) -> int:
+        return next((i for i, part in enumerate(order) if part in name), len(order))
+    return sorted(names, key=rank)
 
 
 def packages(engine) -> List[str]:
@@ -134,7 +141,7 @@ def dataset_state(engine, dataset: str) -> Dict[str, Any]:
 
 
 def running(engine) -> bool:
-    if backend(engine) == "appjail":
+    if _value(engine, "running_check"):
         try:
             engine.execute(CATEGORY, "running_check")
             return True
@@ -151,21 +158,12 @@ def running(engine) -> bool:
 
 
 def info(engine) -> Optional[Dict[str, Any]]:
-    if backend(engine) == "appjail":
-        try:
-            out, _ = engine.execute(CATEGORY, "info")
-        except ENGINE_ERRORS:
-            return None
-        return {"DockerRootDir": data_dirs(engine).get("appjail"), "Driver": "zfs",
-                "ServerVersion": out.strip()}
+    """version, data_root, driver, containers, images: None when the runtime does not answer."""
     try:
-        out, _ = engine.execute(CATEGORY, "info")
-        data = json.loads(out)
+        rows = records.run(engine, CATEGORY, "info")
     except (ENGINE_ERRORS + (ValueError,)):
         return None
-    if not isinstance(data, dict) or data.get("ServerErrors") or not data.get("DockerRootDir"):
-        return None
-    return data
+    return rows[0] if rows else None
 
 
 def _boot_units(engine) -> List[str]:
@@ -174,11 +172,11 @@ def _boot_units(engine) -> List[str]:
 
 def keep_from_boot(engine) -> None:
     """
-    Docker waits for the reconciler, which mounts its datasets first.
-    AppJail's services stay enabled: the jails' NAT is set up at boot, and
-    the pool is imported and mounted before any service starts.
+    The profile's `boot_services`: "disable" leaves the runtime to the
+    reconciler, which mounts its datasets first; "enable" keeps its services
+    starting at boot, when the pool is imported and mounted before them.
     """
-    action = "enable" if backend(engine) == "appjail" else "disable"
+    action = _value(engine, "boot_services", "disable")
     for name in _boot_units(engine):
         engine.execute("services", action, check=False, service_name=name)
 
@@ -218,7 +216,7 @@ def place(engine, dataset: str, path: str) -> List[str]:
     held on the root dataset is moved aside first and copied onto it. A new
     dataset is created unmounted (FreeBSD would mount it at once, over what
     the directory holds) and gets canmount=on once it is in place.
-    Returns what was done. Docker must be stopped.
+    Returns what was done. The runtime must be stopped.
     """
     done: List[str] = []
     state = dataset_state(engine, dataset)
@@ -251,11 +249,95 @@ def place(engine, dataset: str, path: str) -> List[str]:
     return done + mount_at_boot(engine, dataset)
 
 
+def facts(engine) -> Dict[str, str]:
+    """
+    The profile's `facts`: name -> action (or {action, missing}) printing one
+    value of this system, e.g. the interface of the default route.
+    """
+    found = {}
+    for key, entry in (_value(engine, "facts") or {}).items():
+        entry = entry if isinstance(entry, dict) else {"action": entry}
+        out, _ = engine.execute(CATEGORY, entry["action"], check=False)
+        value = out.strip()
+        if not value:
+            raise ContainersError(entry.get("missing") or f"Cannot find the {key} of this system")
+        found[key] = value
+    return found
+
+
+def variables(engine, pool: str, datasets: Dict[str, str]) -> Dict[str, str]:
+    values = {"pool": pool, **facts(engine)}
+    dirs = data_dirs(engine)
+    for name, dataset in datasets.items():
+        values[f"{name}_dataset"] = dataset
+        values[f"{name}_dataset_name"] = dataset.split("/", 1)[1]
+        values[f"{name}_path"] = dirs.get(name, "")
+    return values
+
+
+def file_text(current: str, entry: Dict[str, Any], values: Dict[str, str]) -> str:
+    """
+    A `config_files` entry: {path, lines} is the whole file; {path, block}
+    puts lines between block's begin and end markers, at the start of the
+    file (or the end with "position": "end"), keeping the rest as it is, and
+    adds `unless.line` to the block when no line outside it matches
+    `unless.pattern`.
+    """
+    block = entry.get("block")
+    lines = [records.render(line, values) for line in (block or entry).get("lines", [])]
+    if not block:
+        return "\n".join(lines) + "\n"
+    outside: List[str] = []
+    inside = False
+    for line in current.splitlines():
+        if line.strip() == block["begin"]:
+            inside = True
+        elif line.strip() == block["end"]:
+            inside = False
+        elif not inside:
+            outside.append(line)
+    body = [block["begin"]] + lines
+    unless = block.get("unless")
+    if unless and not any(re.search(unless["pattern"], line) for line in outside):
+        body.append(unless["line"])
+    body.append(block["end"])
+    text = outside + body if block.get("position") == "end" else body + outside
+    return "\n".join(text).rstrip("\n") + "\n"
+
+
+def configure(engine, pool: str, datasets: Dict[str, str]) -> List[str]:
+    """
+    Prepare the host for the runtime, as the profile says: write its
+    `config_files` (only when they change), run `configure` with the
+    variables (pool, facts, <dir>_dataset, <dir>_dataset_name, <dir>_path),
+    then start `configure_services`. Returns the files written.
+    """
+    files = _value(engine, "config_files") or []
+    command = _value(engine, "configure")
+    if not files and not command:
+        return []
+    values = variables(engine, pool, datasets)
+    done: List[str] = []
+    for entry in files:
+        path = records.render(entry["path"], values)
+        current, _ = engine.execute(CATEGORY, "file_read", check=False, file=path)
+        text = file_text(current, entry, values)
+        if current.rstrip("\n") != text.rstrip("\n"):
+            engine.execute_with_stdin(CATEGORY, "file_write", text, file=path)
+            done.append(Path(path).name)
+    if command:
+        engine.execute(CATEGORY, "configure", timeout=3600, **values)
+    for name in _value(engine, "configure_services") or []:
+        engine.execute("services", "start", service_name=name)
+    return done
+
+
 def status(engine, config) -> Dict[str, Any]:
     section = config.get_module_config(MODULE_ID)
     result: Dict[str, Any] = {
         "runtime": runtime_name(engine),
         "backend": backend(engine),
+        "ui": ui(engine),
         "installed": installed(engine),
         "configured": bool(section.get("enabled")),
         "pool": section.get("pool"),
@@ -276,13 +358,8 @@ def status(engine, config) -> Dict[str, Any]:
         result["running"] = running(engine)
         details = info(engine) if result["running"] else None
         if details:
-            result.update(
-                data_root=details.get("DockerRootDir"),
-                driver=details.get("Driver"),
-                version=details.get("ServerVersion"),
-                containers=details.get("Containers"),
-                images=details.get("Images"),
-            )
+            result.update({key: details.get(key) or None
+                           for key in ("data_root", "driver", "version", "containers", "images")})
     dirs = data_dirs(engine)
     for name, dataset in (section.get("datasets") or {}).items():
         result["datasets"].append({"name": name, "dataset": dataset, "path": dirs.get(name),
@@ -315,8 +392,7 @@ def setup(engine, config, pool: str) -> Dict[str, Any]:
     dirs = data_dirs(engine)
     for name, dataset in datasets.items():
         place(engine, dataset, dirs[name])
-    if backend(engine) == "appjail":
-        appjail_runtime.configure(engine, pool, datasets, dirs)
+    configure(engine, pool, datasets)
     keep_from_boot(engine)
     start(engine)
 
@@ -359,10 +435,9 @@ def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative") -> Lis
                 continue
             done = place(engine, datasets[name], dirs[name])
             results.append(_result("dataset", dataset=datasets[name], path=dirs[name], done=", ".join(done)))
-        if backend(engine) == "appjail":
-            done = appjail_runtime.configure(engine, pool, datasets, dirs)
-            if done:
-                results.append(_result("configure", done=", ".join(done)))
+        done = configure(engine, pool, datasets)
+        if done:
+            results.append(_result("configure", done=", ".join(done)))
         keep_from_boot(engine)
         if not running(engine) or info(engine) is None:
             start(engine)

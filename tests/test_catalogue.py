@@ -8,14 +8,12 @@ import pytest
 
 import apps
 import catalogue
-import docker
+import containers
 import runtime
 from conftest import FakeConfig
 
 SECTION = {"enabled": True, "pool": "tank", "datasets": {}}
-LISTENING = ("udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n"
-             "tcp LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:*\n"
-             "tcp LISTEN 0 128 [::]:22 [::]:*\n")
+LISTENING = "127.0.0.53%lo:53\n0.0.0.0:8080\n[::]:22\n"
 
 
 @pytest.fixture
@@ -37,10 +35,10 @@ def nas(engine):
 
 
 def install(engine, config, entry_id, name=None, **changes):
-    taken = catalogue.used_ports(docker, engine, config=config)
+    taken = catalogue.used_ports(containers, engine, config=config)
     values = catalogue.defaults(catalogue.entry(entry_id), config, "sarah", taken)
     values.update(changes)
-    return catalogue.install(runtime, apps, docker, engine, config, entry_id, name or entry_id, values)
+    return catalogue.install(runtime, apps, containers, engine, config, entry_id, name or entry_id, values)
 
 
 def env_of(engine, name):
@@ -67,10 +65,10 @@ def test_no_entry_names_its_containers_or_project():
 
 
 def test_defaults_skip_ports_in_use_and_use_the_system_timezone(nas, config):
-    nas.outputs[("containers", "ps")] = ("\n".join([json.dumps({
-        "ID": "a", "Names": "x", "Image": "x", "State": "running", "Status": "Up",
-        "Ports": "0.0.0.0:8096->8096/tcp, [::]:8096->8096/tcp", "Labels": ""})]), "")
-    values = catalogue.defaults(catalogue.entry("jellyfin"), config, "sarah", catalogue.used_ports(docker, nas))
+    nas.outputs[("containers", "ps")] = (json.dumps({
+        "id": "a", "name": "x", "image": "x", "state": "running", "status": "Up",
+        "published": "0.0.0.0:8096->8096/tcp, [::]:8096->8096/tcp"}), "")
+    values = catalogue.defaults(catalogue.entry("jellyfin"), config, "sarah", catalogue.used_ports(containers, nas))
     assert values["PORT"] == "8097" and values["TZ"] == "Europe/Rome" and values["USER"] == "sarah"
 
 
@@ -125,13 +123,13 @@ def test_pihole_ignores_the_local_resolver_but_not_a_dns_on_the_lan(nas, config)
     install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
     assert env_of(nas, "pihole")["DNS_ADDRESS"] == "192.168.1.10"
     apps.remove(runtime, nas, config, "pihole", destroy_data=True)
-    nas.outputs[("containers", "listening")] = (LISTENING + "udp UNCONN 0 0 0.0.0.0:53 0.0.0.0:*\n", "")
+    nas.outputs[("containers", "listening")] = (LISTENING + "0.0.0.0:53\n", "")
     with pytest.raises(catalogue.CatalogueError, match="port 53"):
         install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
 
 
 def test_home_assistant_needs_its_fixed_port(nas, config):
-    nas.outputs[("containers", "listening")] = (LISTENING + "tcp LISTEN 0 1 0.0.0.0:8123 0.0.0.0:*\n", "")
+    nas.outputs[("containers", "listening")] = (LISTENING + "0.0.0.0:8123\n", "")
     with pytest.raises(catalogue.CatalogueError, match="8123"):
         install(nas, config, "homeassistant")
 
@@ -214,7 +212,7 @@ def test_a_stopped_catalogue_app_keeps_its_ports(nas, config):
     install(nas, config, "jellyfin")
     assert config.section["apps"]["jellyfin"]["ports"] == [8096]
     values = catalogue.defaults(catalogue.entry("jellyfin"), config, "sarah",
-                                catalogue.used_ports(docker, nas, config=config))
+                                catalogue.used_ports(containers, nas, config=config))
     assert values["PORT"] == "8097"
     with pytest.raises(catalogue.CatalogueError, match="8096"):
         install(nas, config, "jellyfin", name="jellyfin2", PORT="8096")

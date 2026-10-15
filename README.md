@@ -6,12 +6,15 @@ Package: `freedomnas-module-containers`. User guide: *Containers* in the
 FreedomNAS documentation.
 
 Docker runs from the edition's own packages, on every Linux edition
-(Debian, Arch, Artix, Void, Gentoo). On FreeBSD the runtime is AppJail
-(`backend: appjail` in containers-freebsd.json, appjail_runtime.py): the
-runtime and its datasets are done, and containers are jails (jails.py,
-the twin of docker.py: AppJail's tab-separated listing, buildah's images,
-`oci run` words NUL-separated through `xargs -0`); apps and the catalogue
-follow.
+(Debian, Arch, Artix, Void, Gentoo). On FreeBSD the runtime is AppJail:
+containers are jails, apps are AppJail Director projects; the catalogue
+follows.
+
+The golden rule holds here as in the core: the Python code knows no
+runtime. Every command, its arguments, the way its output reads, the files
+the host needs and the words the page shows come from
+`profiles/containers/containers-<os>.json`; a new runtime or edition is a
+new profile, not new code (see *Profile keys* below).
 
 ## What it does
 
@@ -52,7 +55,7 @@ follow.
   each an `app.json` (settings and their types, see `catalogue.py`) and a
   `compose.yaml` reading them as `${VARIABLES}`. Installing one creates an
   ordinary app whose `.env` (0600) holds the settings; ports are checked
-  against what listens on the NAS (`ss`), what containers publish and the
+  against what listens on the NAS (`listening`), what containers publish and the
   ports of catalogue apps that are down; passwords are generated, shown
   once, and kept when an app is installed again on its kept dataset.
 
@@ -78,22 +81,51 @@ modules:
 modules/containers/
 ├── manifest.json        id, supported_os, webui (page /containers/, sidebar entry)
 ├── module.py            ContainersModule: health(), reconcile()
-├── runtime.py           the runtime: install, datasets, start after the pool, reconcile
-├── docker.py            containers and images: list, actions, logs, pull, run, input checks
-├── apps.py              Compose apps on their own datasets: create, edit, up/down, update, remove, reconcile
+├── runtime.py           the runtime: install, datasets, host configuration, start after the pool, reconcile
+├── containers.py        containers and images: list, actions, logs, pull, run words, input checks, errors
+├── records.py           reads a command's output as records, as the profile's <action>_output says
+├── apps.py              apps on their own datasets: create, edit, up/down, update, remove, reconcile
 ├── catalogue.py         ready-made apps: defaults, checks, .env, folders
 ├── catalogue/<id>/      app.json + compose.yaml for each ready-made app
 ├── api_routes.py        /api/containers/... (install, setup, pull and run run as jobs, one at a time)
 └── frontend/            containers.html, js/containers.js, icons.svg
 profiles/containers/
-└── containers-<os>.json runtime_check, info, data_dirs, data_move, data_copy,
-                         socket_units (systemd), runtime_repository (Debian),
-                         ps, start/stop/restart, remove(_force), logs, images,
-                         image_pull/_remove/_prune, run (run_args is a multi-argument),
-                         compose_check/_write/_up/_down/_pull/_logs, env_write,
-                         folder_prepare, listening
+└── containers-<os>.json everything the runtime does (see below)
 tests/                   pytest against the freedomnas-core checkout beside this one
 ```
+
+## Profile keys
+
+Each `containers-<os>.json` holds, under `containers`:
+
+| Key | What |
+|-----|------|
+| `runtime_name`, `backend` | the name shown, a label |
+| `runtime_check`, `running_check` | installed?; running? (without it: every service of `packages/containers.json` running) |
+| `info` + `info_output` | records `version`, `data_root`, `driver`, `containers`, `images` |
+| `data_dirs`, `data_move`, `data_copy` | the runtime's data directories, put on `<pool>/containers/<name>` |
+| `boot_services`, `services_order`, `socket_units` | enable or disable the services at boot; start order; extra units |
+| `runtime_repository` | commands run before the packages are installed |
+| `facts`, `config_files`, `configure`, `configure_services` | host preparation at setup and every boot: values of the system, files (whole, or a block in a file kept otherwise), commands, services started |
+| `ps` + `ps_output` | records `id`, `name`, `image`, `state` (`running`), `status`, `published`, `created`, `address` |
+| `ports_pattern`, `name_pattern`, `name_hint` | how `published` reads (groups host, inner, proto); valid names |
+| `images` + `images_output` | records `id`, `repository`, `tag`, `size`, `created`, `containers` |
+| `start`, `stop`, `restart`, `remove`, `remove_force`, `logs` | `{container}`, `{lines}` |
+| `image_pull`, `image_remove`, `image_prune` | `{image}` |
+| `run`, `run_words`, `run_after` | `run` reads NUL-separated words on stdin; `run_words` builds them; `run_after` maps a restart policy to an action |
+| `error_filter` | `{keep, context, strip}`: the stderr lines that name the cause |
+| `listening` + `listening_output` | records `address` (`host:port`) of what listens on the NAS |
+| `app_file`, `compose_check`, `compose_write`, `compose_up`, `compose_down`, `compose_pull`, `compose_update`, `compose_remove`, `compose_logs`, `app_members` | apps: file name, checker (stdin, `{dir}`), project commands (`{project}`, `{file}`), the project's containers |
+| `env_write`, `folder_prepare` | catalogue `.env` and folders |
+| `ui` | words and examples for the page: `container`, `app_tool`, `catalogue`, `name_required`, `volumes_label`, `run_hint`, `examples`, `app_example` |
+
+`<action>_output` (see `records.py`): `format` jsonl (default), json
+(`path`), tsv (`columns`), lines, text; `fields` maps the module's names to
+templates over the command's own (`"{Name}"`), `values` translates values,
+`defaults` fills empty fields, `required` drops records without them.
+Docker and buildah print the module's names directly through Go templates;
+AppJail's tab-separated listing is mapped. `tests/test_profiles.py` formats
+every command of every profile with the real engine.
 
 ## Tests
 

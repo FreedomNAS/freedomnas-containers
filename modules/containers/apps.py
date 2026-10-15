@@ -1,5 +1,6 @@
 """
-Apps: Docker Compose projects, one dataset each.
+Apps: projects of the runtime's own app tool (Docker Compose, AppJail
+Director), one dataset each.
 
 An app named `nextcloud` lives on `<pool>/apps/nextcloud`, on the pool the
 runtime uses, with its compose file at `<mountpoint>/compose.yaml`; bind
@@ -17,18 +18,41 @@ Configuration, under `modules.containers.apps`:
 The compose file itself is on the pool, not in config.yaml. A removed app
 whose dataset was kept is picked up again by a new app of the same name,
 with its data; the new compose file replaces the old one.
+
+What runs an app is the profile: `app_file` names the file (compose.yaml
+when it names none), `compose_check` checks it on stdin as if it were in
+the app's dataset, compose_up/down/pull/update/remove/logs run the project
+(update and remove fall back to pull + up and down when missing; logs to
+each member's own), and `app_members` prints the containers of a project,
+one record each (see records.py).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from freedomnas.reconcile import ActionResult
 except ImportError:
     from reconcile import ActionResult  # type: ignore[no-redef]
+
+
+
+def _load(stem: str):
+    name = f"freedomnas_containers_{stem}"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{stem}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+records = _load("records")
 
 CATEGORY = "containers"
 COMPOSE_FILE = "compose.yaml"
@@ -38,7 +62,6 @@ UP_TIMEOUT = 3600
 MAX_COMPOSE = 256 * 1024
 
 _APP = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
-
 
 
 class AppError(Exception):
@@ -104,8 +127,23 @@ def _mountpoint(runtime, engine, dataset: str) -> str:
     return state["mountpoint"]
 
 
+def _profile(engine, key: str, default: Any = None) -> Any:
+    try:
+        return engine.get_profile_value(CATEGORY, key)
+    except Exception:
+        return default
+
+
+def app_file_name(engine) -> str:
+    return _profile(engine, "app_file", COMPOSE_FILE)
+
+
+def supported(engine) -> bool:
+    return bool(_profile(engine, "compose_up"))
+
+
 def compose_file(runtime, engine, dataset: str) -> str:
-    return str(Path(_mountpoint(runtime, engine, dataset)) / COMPOSE_FILE)
+    return str(Path(_mountpoint(runtime, engine, dataset)) / app_file_name(engine))
 
 
 def check_size(text: str) -> None:
@@ -117,8 +155,9 @@ def check_size(text: str) -> None:
 
 def validate(engine, text: str, directory: str) -> None:
     """
-    Check a compose file with Docker Compose as if it were in `directory`,
-    the app's dataset: its .env and relative paths are read from there.
+    Check an app file with the runtime's own checker as if it were in
+    `directory`, the app's dataset: its .env and relative paths are read
+    from there.
     """
     check_size(text)
     try:
@@ -136,15 +175,28 @@ def _compose(engine, action: str, name: str, file: str, timeout: int = UP_TIMEOU
     return engine.execute(CATEGORY, action, timeout=timeout, project=name, file=file, **kw)
 
 
-def listing(runtime, docker, engine, config) -> List[Dict[str, Any]]:
+def member_names(engine, name: str) -> List[str]:
+    """The names of the containers of the app `name`, as `app_members` gives them."""
+    return [row["name"] for row in records.run(engine, CATEGORY, "app_members", project=name) if row.get("name")]
+
+
+def members(engine, containers: List[Dict[str, Any]], name: str) -> List[Dict[str, Any]]:
+    try:
+        names = set(member_names(engine, name))
+    except Exception:
+        return []
+    return [c for c in containers if c.get("name") in names]
+
+
+def listing(runtime, rt, engine, config) -> List[Dict[str, Any]]:
     containers: List[Dict[str, Any]] = []
     try:
-        containers = docker.containers(engine)
+        containers = rt.containers(engine)
     except Exception:
         pass
     result = []
     for name, app in sorted(_apps(config).items()):
-        own = [c for c in containers if c.get("project") == name]
+        own = members(engine, containers, name)
         running = sum(1 for c in own if c["state"] == "running")
         result.append({
             "name": name,
@@ -152,7 +204,7 @@ def listing(runtime, docker, engine, config) -> List[Dict[str, Any]]:
             "state": app.get("state", "down"),
             "containers": len(own),
             "running": running,
-            "ports": docker.short_ports(", ".join(c["published"] for c in own if c["published"])),
+            "ports": ", ".join(dict.fromkeys(p for c in own for p in c["ports"].split(", ") if p)),
             "catalogue": app.get("catalogue"),
             "web_port": app.get("web_port"),
         })
@@ -223,20 +275,28 @@ def set_state(runtime, engine, config, name: str, state: str) -> None:
 
 
 def refresh(runtime, engine, config, name: str) -> None:
+    """Fetch the app's images again (compose_pull) and recreate it when up (compose_update, else compose_up)."""
     app = _apps(config).get(check_name(name))
     if not app:
         raise AppError(f"No app '{name}'")
     file = compose_file(runtime, engine, app["dataset"])
-    _compose(engine, "compose_pull", name, file)
+    if _profile(engine, "compose_pull"):
+        _compose(engine, "compose_pull", name, file)
     if app.get("state") == "up":
-        _compose(engine, "compose_up", name, file)
+        _compose(engine, "compose_update" if _profile(engine, "compose_update") else "compose_up", name, file)
 
 
-def logs(runtime, engine, config, name: str, lines: int = 200) -> str:
+def logs(runtime, engine, config, name: str, lines: int = 200, rt=None) -> str:
+    """The app's logs: the profile's compose_logs, else each member's through `rt` (containers.py)."""
     app = _apps(config).get(check_name(name))
     if not app:
         raise AppError(f"No app '{name}'")
     lines = max(1, min(int(lines), 5000))
+    if not _profile(engine, "compose_logs"):
+        parts = []
+        for member in member_names(engine, name):
+            parts.append(f"== {member}\n" + rt.logs(engine, member, lines))
+        return "\n".join(parts)
     out, err = _compose(engine, "compose_logs", name, compose_file(runtime, engine, app["dataset"]),
                         timeout=60, lines=str(lines))
     return "\n".join(part for part in (out, err) if part)
@@ -251,7 +311,7 @@ def remove(runtime, engine, config, name: str, destroy_data: bool = False) -> No
     if state["exists"]:
         file = compose_file(runtime, engine, app["dataset"])
         if Path(file).exists():
-            _compose(engine, "compose_down", name, file)
+            _compose(engine, "compose_remove" if _profile(engine, "compose_remove") else "compose_down", name, file)
         if destroy_data:
             engine.execute("zfs", "dataset_destroy_recursive", timeout=300, dataset=app["dataset"])
     del apps[name]
@@ -263,20 +323,21 @@ def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:
                         target_state="failed" if error else "applied", error=error)
 
 
-def reconcile(runtime, docker, engine, desired: Dict[str, Any]) -> List[ActionResult]:
+def reconcile(runtime, rt, engine, desired: Dict[str, Any]) -> List[ActionResult]:
     apps = desired.get("apps") or {}
     wanted = {name: app for name, app in apps.items() if app.get("state") == "up"}
     if not wanted or not desired.get("enabled"):
         return []
     if runtime.info(engine) is None:
-        return [_result(name, "Docker is not running", app=name) for name in sorted(wanted)]
+        return [_result(name, f"{runtime.runtime_name(engine)} is not running", app=name)
+                for name in sorted(wanted)]
     try:
-        containers = docker.containers(engine)
+        containers = rt.containers(engine)
     except Exception as exc:
         return [_result("list", str(exc))]
     results: List[ActionResult] = []
     for name, app in sorted(wanted.items()):
-        own = [c for c in containers if c.get("project") == name]
+        own = members(engine, containers, name)
         if own and all(c["state"] == "running" for c in own):
             continue
         try:

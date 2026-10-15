@@ -44,10 +44,10 @@ async function loadStatus() {
   render();
   const job = _status.job || {};
   const ready = _status.installed && _status.running && !!_status.version;
-  const composeApps = _status.backend !== 'appjail';
-  document.getElementById('apps-section').hidden = !ready || !composeApps;
-  document.getElementById('catalogue-section').hidden = !ready || !composeApps;
-  if (ready && composeApps && !_catalogue) loadCatalogue();
+  const ui = _status.ui || {};
+  document.getElementById('apps-section').hidden = !ready || !_status.apps;
+  document.getElementById('catalogue-section').hidden = !ready || !_status.apps || !ui.catalogue;
+  if (ready && _status.apps && ui.catalogue && !_catalogue) loadCatalogue();
   document.getElementById('containers-section').hidden = !ready;
   document.getElementById('images-section').hidden = !ready;
   const jobKey = `${job.kind}:${job.state}:${job.finished}`;
@@ -72,14 +72,23 @@ function render() {
   else state = '<span class="badge badge-err">Not running</span>';
 
   const rt = s.runtime || 'Docker';
-  document.querySelectorAll('.rt-name').forEach(e => { e.textContent = rt; });
-  const jail = s.backend === 'appjail';
-  document.querySelectorAll('.jail-only').forEach(e => { e.hidden = !jail; });
-  document.querySelectorAll('.docker-only').forEach(e => { e.hidden = jail; });
-  document.getElementById('f-run-name').required = jail;
-  const hints = jail
-    ? {image: 'ghcr.io/appjail-makejails/nginx:latest', ports: '8081:80', volumes: '/tank/web:/usr/local/www'}
-    : {image: 'nginx:alpine', ports: '8081:80', volumes: 'webdata:/usr/share/nginx/html'};
+  const ui = s.ui || {};
+  const fill = (selector, text) => {
+    if (text) document.querySelectorAll(selector).forEach(e => { e.textContent = text; });
+  };
+  fill('.rt-name', rt);
+  fill('.ct-word', ui.container);
+  fill('.app-tool', ui.app_tool);
+  fill('.app-file', s.app_file);
+  fill('#run-volumes-label', ui.volumes_label);
+  fill('#run-hint', ui.run_hint);
+  const nameHint = document.getElementById('run-name-hint');
+  nameHint.textContent = `A ${ui.container || 'container'} always needs a name.`;
+  nameHint.hidden = !ui.name_required;
+  document.getElementById('f-run-name').required = !!ui.name_required;
+  if (ui.app_example) document.getElementById('f-app-compose').placeholder = ui.app_example;
+  const hints = Object.assign({image: 'nginx:alpine', ports: '8081:80', volumes: 'webdata:/usr/share/nginx/html'},
+                              ui.examples || {});
   document.getElementById('f-run-image').placeholder = hints.image;
   document.getElementById('f-run-ports').placeholder = hints.ports;
   document.getElementById('f-run-volumes').placeholder = hints.volumes;
@@ -151,8 +160,7 @@ async function setupRuntime() {
 }
 
 async function loadLists() {
-  const composeApps = !_status || _status.backend !== 'appjail';
-  await Promise.all([composeApps ? loadApps() : null, loadContainers(), loadImages()]);
+  await Promise.all([_status && _status.apps ? loadApps() : null, loadContainers(), loadImages()]);
 }
 
 let _apps = [];

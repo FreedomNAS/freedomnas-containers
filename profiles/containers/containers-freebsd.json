@@ -1,7 +1,9 @@
 {
   "containers": {
-    "_note": "AppJail for the containers module on FreeBSD. Package names and services come from freedomnas-profiles' packages/containers.json; this file holds only what the module runs itself. backend appjail: jails, releases, networks and logs live in AppJail's root /usr/local/appjail, OCI images in buildah's /var/db/containers; each is mounted from <pool>/containers/<name> (canmount=on), outside the root dataset, so neither grows the system nor goes back with its rollback. appjail.conf points AppJail's ZFS root at the same dataset, storage.conf points buildah's zfs driver at the oci one: without it every image layer becomes a dataset under the root. AppJail's services stay enabled at boot (the NAT of the jails' network comes from appjail-natnet; the pool is imported and mounted before services start); running means pf is enabled, AppJail has no daemon. pf carries AppJail's NAT and expose anchors in a block of /etc/pf.conf between # freedomnas appjail begin/end; the rest of the file is left as it is. Containers are jails: ps lists them tab-separated (appjail jail list -eHIp), images come from buildah; run reads its words NUL-separated on stdin (xargs -0), because AppJail's options hold spaces (fstab=src dst).",
+    "_note": "AppJail for the containers module on FreeBSD. Package names and services come from freedomnas-profiles' packages/containers.json; this file holds only what the module runs itself, and how their output reads (*_output, see the module's records.py). Jails, releases, networks and logs live in AppJail's root /usr/local/appjail, OCI images in buildah's /var/db/containers; each is mounted from <pool>/containers/<name> (canmount=on), outside the root dataset, so neither grows the system nor goes back with its rollback. config_files point AppJail's ZFS root at the same dataset (appjail.conf) and buildah's zfs driver at the oci one (storage.conf: without it every image layer becomes a dataset under the root), and keep AppJail's NAT and expose anchors in a block of /etc/pf.conf between # freedomnas appjail begin/end (the rest of the file is left as it is; pass all only when the file has no pass rule of its own); configure enables forwarding and pf, loads the rules, adds the jails' network fnasjails and fetches the release; all of it at setup and at every boot (facts: the interface of the default route, the release, the architecture). boot_services enable: the NAT of the jails' network comes from appjail-natnet, and the pool is imported and mounted before services start; running means pf is enabled, AppJail has no daemon. Containers are jails on fnasjails behind NAT: ps lists them tab-separated; logs reads the newest log of the jail's process, else of its console; run reads its words NUL-separated on stdin (xargs -0), because AppJail's options hold spaces (fstab=src dst). Apps are AppJail Director projects named like the app: app_file appjail-director.yml on the app's dataset, its .env beside it (-e), paths in it relative to the file; compose_check runs Director's own parser on it; update = up --overwrite, remove = down --destroy; a project that was never brought up has nothing to stop or describe (check first).",
+    "runtime_name": "AppJail",
     "backend": "appjail",
+    "boot_services": "enable",
     "data_dirs": {
       "appjail": "/usr/local/appjail",
       "oci": "/var/db/containers"
@@ -9,43 +11,223 @@
     "runtime_check": "appjail version",
     "running_check": "sh -c 'pfctl -s info | grep -q \"Status: Enabled\"'",
     "info": "appjail version",
+    "info_output": {
+      "format": "text",
+      "fields": {
+        "version": "{text}",
+        "data_root": "/usr/local/appjail",
+        "driver": "zfs"
+      },
+      "required": [
+        "version"
+      ]
+    },
     "data_copy": "cp -a {source}/. {target}/",
     "data_move": "mv {source} {target}",
-    "default_route": "route -n get default",
-    "system_version": "freebsd-version -u",
+    "facts": {
+      "interface": {
+        "action": "default_interface",
+        "missing": "No default route: jails reach the network through the interface of the default route"
+      },
+      "version": "system_version",
+      "arch": "system_arch"
+    },
+    "default_interface": "route -n get default | awk '/interface:/ {{print $2}}'",
+    "system_version": "freebsd-version -u | sed 's/-p.*//'",
     "system_arch": "uname -m",
     "file_read": "cat {file}",
     "file_write": "sh -c 'umask 022 && cat > \"$1\"' file_write {file}",
-    "sysrc_set": "sysrc {setting}",
-    "sysctl_set": "sysctl {setting}",
-    "kmod_load": "kldload -n {module}",
-    "pf_load": "pfctl -f /etc/pf.conf",
-    "network_list": "appjail network list -eHIp name network",
-    "network_add": "appjail network add {name} {network}",
-    "release_check": "test -d /usr/local/appjail/releases/{arch}/{version}/default/release",
-    "release_fetch": "appjail fetch",
-    "appjail_conf": "/usr/local/etc/appjail/appjail.conf",
-    "storage_conf": "/usr/local/etc/containers/storage.conf",
-    "pf_conf": "/etc/pf.conf",
-    "jail_network": {
-      "name": "fnasjails",
-      "network": "10.231.0.0/24"
+    "config_files": [
+      {
+        "path": "/usr/local/etc/appjail/appjail.conf",
+        "lines": [
+          "# Written by FreedomNAS (containers module): AppJail's ZFS root on the pool's dataset.",
+          "EXT_IF={interface}",
+          "ON_IF={interface}",
+          "FREEBSD_VERSION={version}",
+          "FREEBSD_ARCH={arch}",
+          "IMAGE_ARCH={arch}",
+          "SHORTEN_DOMAIN_NAMES=1",
+          "ENABLE_ZFS=1",
+          "ZPOOL={pool}",
+          "ZROOTFS={appjail_dataset_name}",
+          "TAR_XZ_ARGS=\"--xz --options xz:threads=0\"",
+          "TAR_ZSTD_ARGS=\"--zstd --options zstd:threads=0\""
+        ]
+      },
+      {
+        "path": "/usr/local/etc/containers/storage.conf",
+        "lines": [
+          "# Written by FreedomNAS (containers module): image layers on the pool's dataset.",
+          "[storage]",
+          "driver = \"zfs\"",
+          "runroot = \"/var/run/containers/storage\"",
+          "graphroot = \"{oci_path}/storage\"",
+          "",
+          "[storage.options.zfs]",
+          "fsname = \"{oci_dataset}\""
+        ]
+      },
+      {
+        "path": "/etc/pf.conf",
+        "block": {
+          "begin": "# freedomnas appjail begin",
+          "end": "# freedomnas appjail end",
+          "lines": [
+            "nat-anchor \"appjail-nat/jail/*\"",
+            "nat-anchor \"appjail-nat/network/*\"",
+            "rdr-anchor \"appjail-rdr/*\""
+          ],
+          "unless": {
+            "pattern": "^\\s*pass\\b",
+            "line": "pass all"
+          }
+        }
+      }
+    ],
+    "configure": [
+      "sysrc gateway_enable=YES pf_enable=YES",
+      "sysctl net.inet.ip.forwarding=1",
+      "kldload -n pf",
+      "pfctl -f /etc/pf.conf",
+      "sh -c 'appjail network list -eHIp name | cut -f1 | grep -qx fnasjails || appjail network add fnasjails 10.231.0.0/24'",
+      "sh -c 'test -d \"/usr/local/appjail/releases/$1/$2/default/release\" || appjail fetch' release_fetch {arch} {version}"
+    ],
+    "configure_services": [
+      "pf"
+    ],
+    "ps": "appjail jail list -eHIp name status type version ports network_ip4 container_image created",
+    "ps_output": {
+      "format": "tsv",
+      "columns": [
+        "name",
+        "status",
+        "type",
+        "version",
+        "ports",
+        "network_ip4",
+        "container_image",
+        "created"
+      ],
+      "fields": {
+        "id": "{name}",
+        "name": "{name}",
+        "image": "{container_image}",
+        "state": "{status}",
+        "status": "{status} · {type} jail",
+        "published": "{ports}",
+        "created": "{created}",
+        "address": "{network_ip4}"
+      },
+      "values": {
+        "state": {
+          "UP": "running",
+          "*": "exited"
+        }
+      },
+      "defaults": {
+        "image": "FreeBSD {version}"
+      }
     },
-    "ps": "appjail jail list -eHIp name status type version ports network_ip4 container_image created boot is_container",
-    "images": "buildah images --json",
+    "ports_pattern": "(?P<host>\\d+)(?:\\s*->\\s*(?P<inner>\\d+))?/(?P<proto>tcp|udp)",
+    "name_pattern": "[A-Za-z0-9][A-Za-z0-9_-]{0,62}",
+    "name_hint": "jail name (letters, digits, - and _)",
+    "images": "buildah images --format '{{\"id\":{{{{json .ID}}}},\"repository\":{{{{json .Name}}}},\"tag\":{{{{json .Tag}}}},\"size\":{{{{json .Size}}}},\"created\":{{{{json .CreatedAt}}}}}}'",
     "start": "appjail start {container}",
     "stop": "appjail stop {container}",
     "restart": "appjail restart {container}",
     "remove": "appjail jail destroy {container}",
     "remove_force": "sh -c 'appjail stop \"$1\" >/dev/null 2>&1; appjail jail destroy \"$1\"' remove_force {container}",
-    "log_list": "appjail logs",
-    "log_read": "sh -c 'appjail logs read \"$1\" | tail -n \"$2\"' log_read {path} {lines}",
+    "logs": "sh -c 'for t in container console; do f=$(appjail logs list -eHp \"jails/$1/$t\" 2>/dev/null | sort | tail -n 1); if [ -n \"$f\" ]; then appjail logs read \"jails/$1/$t/$f\" | tail -n \"$2\"; exit; fi; done' logs {container} {lines}",
     "image_pull": "buildah pull {image}",
     "image_remove": "buildah rmi {image}",
     "image_prune": "buildah rmi --prune",
     "run": "xargs -0 appjail oci run -Pd",
+    "run_words": {
+      "start": [
+        "-o",
+        "virtualnet=fnasjails:<random> default",
+        "-o",
+        "nat",
+        "-o",
+        "template=/usr/local/share/examples/appjail/templates/freebsd-oci.conf"
+      ],
+      "port": {
+        "tcp": [
+          "-o",
+          "expose={host}:{inner}"
+        ],
+        "udp": [
+          "-o",
+          "expose={host}:{inner} proto:udp"
+        ]
+      },
+      "volume": {
+        "rw": [
+          "-o",
+          "fstab={source} {target}"
+        ],
+        "ro": [
+          "-o",
+          "fstab={source} {target} nullfs ro"
+        ]
+      },
+      "env": [
+        "-e",
+        "{env}"
+      ],
+      "end": [
+        "{image}",
+        "{name}"
+      ],
+      "name_required": true
+    },
+    "run_after": {
+      "no": "boot_off"
+    },
     "boot_off": "appjail jail boot off {container}",
-    "oci_template": "/usr/local/share/examples/appjail/templates/freebsd-oci.conf",
-    "listening": "sockstat -46l"
+    "error_filter": {
+      "keep": "\\[ error \\]",
+      "context": 1,
+      "strip": "^\\[[\\d:]+\\] \\[\\s*\\w+\\s*\\] (\\[[^\\]]+\\] )?"
+    },
+    "listening": "sockstat -46lq | awk '{{print $6}}'",
+    "listening_output": {
+      "format": "lines",
+      "fields": {
+        "address": "{line}"
+      }
+    },
+    "app_file": "appjail-director.yml",
+    "compose_check": "sh -c 'cd \"$1\" && \"$(sed -n \"1s/^#!//p\" \"$(command -v appjail-director)\")\" -c \"import sys, director.parser\ntry: director.parser.load(sys.argv[1])\nexcept Exception as e: sys.exit(str(e))\" /dev/stdin' compose_check {dir}",
+    "compose_up": "sh -c 'appjail-director -e \"${{2%/*}}/.env\" up -p \"$1\" -f \"$2\"' compose_up {project} {file}",
+    "compose_update": "sh -c 'appjail-director -e \"${{2%/*}}/.env\" up --overwrite -p \"$1\" -f \"$2\"' compose_update {project} {file}",
+    "compose_down": "sh -c 'appjail-director check -p \"$1\" >/dev/null 2>&1 || exit 0; appjail-director down -p \"$1\"' compose_down {project} {file}",
+    "compose_remove": "sh -c 'appjail-director check -p \"$1\" >/dev/null 2>&1 || exit 0; appjail-director down --destroy -p \"$1\"' compose_remove {project} {file}",
+    "app_members": "sh -c 'appjail-director check -p \"$1\" >/dev/null 2>&1 || exit 0; appjail-director describe -p \"$1\"' app_members {project}",
+    "app_members_output": {
+      "format": "json",
+      "path": "services",
+      "fields": {
+        "name": "{jail}"
+      }
+    },
+    "compose_write": "sh -c 'umask 022 && cat > \"$1\"' compose_write {file}",
+    "env_write": "sh -c 'umask 077 && cat > \"$1\"' env_write {file}",
+    "folder_prepare": "install -d -o {uid} -g {gid} {path}",
+    "ui": {
+      "container": "jail",
+      "app_tool": "AppJail Director",
+      "catalogue": false,
+      "name_required": true,
+      "volumes_label": "Folders, one per line (/path of the pool : /path in the jail)",
+      "run_hint": "A jail mounts folders only: a path like /tank/media, then the path in the jail. Ports are host:jail, with /udp for UDP; the jail sits on its own network behind NAT.",
+      "examples": {
+        "image": "ghcr.io/appjail-makejails/nginx:latest",
+        "ports": "8081:80",
+        "volumes": "/tank/web:/usr/local/www"
+      },
+      "app_example": "options:\n  - virtualnet: \"fnasjails:<random> default\"\n  - nat:\nservices:\n  web:\n    name: site-web\n    makejail: ./Makejail\n    options:\n      - template: /usr/local/share/examples/appjail/templates/freebsd-oci.conf\n      - expose: \"8080:80\"\n    volumes:\n      - html: /usr/local/www/nginx\nvolumes:\n  html:\n    device: ./html"
+    }
   }
 }

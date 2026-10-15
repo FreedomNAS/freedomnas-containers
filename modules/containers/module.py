@@ -1,7 +1,7 @@
 """
 ContainersModule — the container runtime and the datasets that hold it.
 
-The work is done in runtime.py, docker.py and apps.py, shared with
+The work is done in runtime.py, containers.py and apps.py, shared with
 api_routes.py; both load them by file path, as freedomnas-core loads this file, so the module needs no
 importable package.
 """
@@ -37,12 +37,12 @@ def load(stem: str):
 
 
 runtime = load("runtime")
-docker = load("docker")
+containers = load("containers")
 apps = load("apps")
 
 
 class ContainersModule(FreedomNASModule):
-    """Docker with its data root on a dataset of a chosen pool."""
+    """The container runtime with its data on datasets of a chosen pool."""
 
     def __init__(self, engine: FreedomNASEngine, config: ConfigurationManager):
         super().__init__(engine, config)
@@ -63,20 +63,22 @@ class ContainersModule(FreedomNASModule):
 
     def health(self) -> Tuple[bool, str]:
         try:
+            name = runtime.runtime_name(self._engine)
             if not self._section.get("enabled"):
                 if runtime.installed(self._engine):
-                    return True, "Docker installed, not set up"
+                    return True, f"{name} installed, not set up"
                 return True, "not set up"
             details = runtime.info(self._engine) if runtime.running(self._engine) else None
             if not details:
-                return False, "Docker is not running"
+                return False, f"{name} is not running"
             datasets = self._section.get("datasets") or {}
             unmounted = [ds for ds in datasets.values()
                          if not runtime.dataset_state(self._engine, ds)["mounted"]]
             if unmounted:
                 return False, f"not mounted: {', '.join(unmounted)}"
-            return True, (f"Docker {details.get('ServerVersion')} on {self._section.get('pool')}: "
-                          f"{details.get('Containers', 0)} containers, {details.get('Images', 0)} images")
+            counts = ", ".join(f"{details[key]} {key}" for key in ("containers", "images")
+                               if details.get(key) not in (None, ""))
+            return True, f"{name} {details.get('version')} on {self._section.get('pool')}" + (f": {counts}" if counts else "")
         except Exception as exc:
             logger.warning("Containers health check failed: %s", exc)
             return False, str(exc)
@@ -85,4 +87,4 @@ class ContainersModule(FreedomNASModule):
         results = runtime.reconcile(self._engine, desired, mode)
         if any(r.target_state == "failed" for r in results):
             return results
-        return results + apps.reconcile(runtime, docker, self._engine, desired)
+        return results + apps.reconcile(runtime, containers, self._engine, desired)

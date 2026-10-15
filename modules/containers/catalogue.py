@@ -35,13 +35,29 @@ A reinstall on a kept dataset keeps the passwords and secrets of its old
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import pwd
 import re
 import secrets
 import socket
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
+
+
+def _load(stem: str):
+    name = f"freedomnas_containers_{stem}"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{stem}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+records = _load("records")
 
 CATEGORY = "containers"
 ROOT = Path(__file__).with_name("catalogue")
@@ -56,7 +72,6 @@ _PASSWORD = re.compile(r"[A-Za-z0-9!#%&()*+,./:;<=>?@^_{|}~\[\]-]{8,128}")
 _HOSTS = re.compile(r"[A-Za-z0-9.:-]+(?: [A-Za-z0-9.:-]+)*")
 _TZ = re.compile(r"[A-Za-z0-9_+/-]{1,64}")
 _IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)")
-_HOST_PORT = re.compile(r"(?:^|[\s,])(?:[\d.]+|\[::\]):(\d+)->")
 _LISTEN = re.compile(r":(\d+)$")
 
 
@@ -89,7 +104,7 @@ def _loopback(address: str) -> bool:
     return address.startswith(("127.", "[::1]", "::1")) or "%lo" in address
 
 
-def used_ports(docker, engine, public_only: bool = False, config=None) -> Set[int]:
+def used_ports(rt, engine, public_only: bool = False, config=None) -> Set[int]:
     """
     Ports something on the NAS listens on (TCP or UDP), the ports
     containers publish, stopped ones included, and the ports of catalogue
@@ -101,17 +116,16 @@ def used_ports(docker, engine, public_only: bool = False, config=None) -> Set[in
         for app in (config.get_module_config("containers").get("apps") or {}).values():
             ports.update(int(p) for p in app.get("ports") or ([app["web_port"]] if app.get("web_port") else []))
     try:
-        out, _ = engine.execute(CATEGORY, "listening")
-        for line in out.splitlines():
-            fields = line.split()
-            match = _LISTEN.search(fields[4]) if len(fields) > 4 else None
-            if match and not (public_only and _loopback(fields[4])):
+        for row in records.run(engine, CATEGORY, "listening"):
+            address = row.get("address") or ""
+            match = _LISTEN.search(address)
+            if match and not (public_only and _loopback(address)):
                 ports.add(int(match.group(1)))
     except Exception:
         pass
     try:
-        for container in docker.containers(engine):
-            ports.update(int(p) for p in _HOST_PORT.findall(container.get("published") or ""))
+        for container in rt.containers(engine):
+            ports.update(container.get("host_ports") or [])
     except Exception:
         pass
     return ports
@@ -178,7 +192,7 @@ def _pool_mountpoints(engine) -> List[str]:
 
 
 def pool_folders(engine) -> List[str]:
-    """The pool directories a folder setting offers, without the apps' and Docker's own."""
+    """The pool directories a folder setting offers, without the apps' and the runtime's own."""
     return sorted({mountpoint for name, mountpoint in _pool_datasets(engine)
                    if name.split("/")[1:2] not in (["apps"], ["containers"])})
 
@@ -311,7 +325,7 @@ def web_port(item: Dict[str, Any], env: Dict[str, str]) -> Optional[str]:
     return env.get(web.get("port", ""))
 
 
-def install(runtime, apps, docker, engine, config, entry_id: str, name: str,
+def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             values: Dict[str, str]) -> Dict[str, Any]:
     """
     Create the app from the catalogue entry; the caller brings it up.
@@ -319,8 +333,8 @@ def install(runtime, apps, docker, engine, config, entry_id: str, name: str,
     """
     item = entry(entry_id)
     apps.check_name(name)
-    env = resolve(item, values, engine, config, used_ports(docker, engine, config=config),
-                  used_ports(docker, engine, public_only=True, config=config))
+    env = resolve(item, values, engine, config, used_ports(rt, engine, config=config),
+                  used_ports(rt, engine, public_only=True, config=config))
     text = (item["_dir"] / "compose.yaml").read_text()
     dataset = apps.dataset_for(config.get_module_config("containers").get("pool") or "", name)
     if runtime.dataset_state(engine, dataset)["exists"] and name not in (

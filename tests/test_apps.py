@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import apps
-import docker
+import containers
 import runtime
 from conftest import FakeConfig
 
@@ -132,16 +132,22 @@ def test_removing_with_the_data_destroys_the_dataset(engine, config):
 
 
 def ps(*rows):
-    return ("\n".join(json.dumps({"ID": n, "Names": n, "Image": "x", "State": st, "Status": st, "Ports": p,
-                                  "Labels": f"com.docker.compose.project={proj}"}) for n, st, p, proj in rows), "")
+    return ("\n".join(json.dumps({"id": n, "name": n, "image": "x", "state": st, "status": st, "published": p})
+                      for n, st, p, proj in rows), "")
+
+
+def members(engine, *rows):
+    engine.outputs[("containers", "app_members")] = ("\n".join(n for n, _, _, proj in rows if proj == "web"), "")
 
 
 def test_the_listing_counts_each_app_s_containers(engine, config):
     apps.create(runtime, engine, config, "web", COMPOSE)
     apps.set_state(runtime, engine, config, "web", "up")
-    engine.outputs[("containers", "ps")] = ps(("web-web-1", "running", "0.0.0.0:8080->80/tcp", "web"),
-                                              ("web-db-1", "exited", "", "web"), ("other", "running", "", "x"))
-    [app] = apps.listing(runtime, docker, engine, config)
+    rows = (("web-web-1", "running", "0.0.0.0:8080->80/tcp", "web"),
+            ("web-db-1", "exited", "", "web"), ("other", "running", "", "x"))
+    engine.outputs[("containers", "ps")] = ps(*rows)
+    members(engine, *rows)
+    [app] = apps.listing(runtime, containers, engine, config)
     assert (app["name"], app["state"], app["containers"], app["running"]) == ("web", "up", 2, 1)
     assert app["ports"] == "8080→80"
 
@@ -153,7 +159,7 @@ def desired(state="up"):
 def test_reconcile_brings_up_an_app_that_is_not_running(engine, config):
     apps.create(runtime, engine, config, "web", COMPOSE)
     engine.running.add("docker")
-    results = apps.reconcile(runtime, docker, engine, desired())
+    results = apps.reconcile(runtime, containers, engine, desired())
     assert [(r.action, r.target_state) for r in results] == [("containers.apps.web", "applied")]
 
 
@@ -161,25 +167,26 @@ def test_reconcile_leaves_a_running_app_alone(engine, config):
     apps.create(runtime, engine, config, "web", COMPOSE)
     engine.running.add("docker")
     engine.outputs[("containers", "ps")] = ps(("web-web-1", "running", "", "web"))
-    assert apps.reconcile(runtime, docker, engine, desired()) == []
+    members(engine, ("web-web-1", "running", "", "web"))
+    assert apps.reconcile(runtime, containers, engine, desired()) == []
 
 
 def test_reconcile_ignores_stopped_apps(engine, config):
     apps.create(runtime, engine, config, "web", COMPOSE)
     engine.running.add("docker")
-    assert apps.reconcile(runtime, docker, engine, desired("down")) == []
+    assert apps.reconcile(runtime, containers, engine, desired("down")) == []
 
 
 def test_reconcile_reports_a_missing_compose_file(engine, config):
     apps.create(runtime, engine, config, "web", COMPOSE)
     engine.running.add("docker")
     (Path(engine.datasets["tank/apps/web"]["mountpoint"]) / "compose.yaml").unlink()
-    [result] = apps.reconcile(runtime, docker, engine, desired())
+    [result] = apps.reconcile(runtime, containers, engine, desired())
     assert result.target_state == "failed" and "missing" in result.error
 
 
 def test_reconcile_without_docker_fails_each_app(engine, config):
-    [result] = apps.reconcile(runtime, docker, engine, desired())
+    [result] = apps.reconcile(runtime, containers, engine, desired())
     assert result.target_state == "failed"
 
 
@@ -196,9 +203,9 @@ def test_the_module_brings_apps_up_after_the_runtime(engine, config):
     assert [r.action for r in results] == ["containers.start", "containers.apps.web"]
 
 
-def test_published_ports_are_shown_once_and_short():
+def test_published_ports_are_shown_once_and_short(engine):
     text = "0.0.0.0:8090->80/tcp, [::]:8090->80/tcp, 10.0.2.15:53->53/udp, 0.0.0.0:8091->80/tcp"
-    assert docker.short_ports(text) == "8090→80, 53→53/udp, 8091→80"
+    assert containers.short_ports(engine, text) == "8090→80, 53/udp, 8091→80"
 
 
 def test_a_pool_mounted_nowhere_gives_the_apps_a_mountpoint(engine, config):

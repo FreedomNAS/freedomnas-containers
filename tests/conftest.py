@@ -18,9 +18,9 @@ from freedomnas.engine import CommandExecutionError, CommandTranslationError  # 
 from freedomnas.package_manager import PackageManager  # noqa: E402
 
 sys.path.insert(0, str(REPO / "modules" / "containers"))
+import records  # noqa: E402
 import runtime  # noqa: E402
-import docker  # noqa: E402
-import jails  # noqa: E402
+import containers  # noqa: E402
 import apps  # noqa: E402
 import catalogue  # noqa: E402
 
@@ -120,8 +120,8 @@ class FakeEngine:
         if key == ("containers", "info"):
             if "docker" not in self.running:
                 raise CommandExecutionError("Cannot connect to the Docker daemon")
-            return json.dumps({"DockerRootDir": "/var/lib/docker", "Driver": "overlayfs",
-                               "ServerVersion": "29.0", "Containers": 2, "Images": 3}), ""
+            return json.dumps({"data_root": "/var/lib/docker", "driver": "overlayfs",
+                               "version": "29.0", "containers": 2, "images": 3}), ""
         return self.outputs.get(key, ("", ""))
 
     def execute_with_stdin(self, category, action, stdin_data, timeout=30, **kw):

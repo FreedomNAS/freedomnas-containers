@@ -1,8 +1,21 @@
 {
   "containers": {
-    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself. data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=on, so the system mounts it at boot before any service), so Docker's own configuration and image store stay as they are.",
+    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself, and how their output reads (*_output, see the module's records.py). data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=on, so the system mounts it at boot before any service), so Docker's own configuration and image store stay as they are; boot_services disable: Docker waits for the module's reconcile. ps, images and info print JSON lines with the module's field names through Go templates; ports_pattern reads the Ports text. run reads its words NUL-separated on stdin (xargs -0), built from run_words. Apps are Compose projects (compose.yaml), app_members lists a project's containers.",
+    "runtime_name": "Docker",
+    "backend": "docker",
+    "boot_services": "disable",
+    "services_order": [
+      "containerd",
+      "docker"
+    ],
     "runtime_check": "docker --version",
-    "info": "docker info --format json",
+    "info": "docker info --format '{{\"version\":{{{{json .ServerVersion}}}},\"data_root\":{{{{json .DockerRootDir}}}},\"driver\":{{{{json .Driver}}}},\"containers\":{{{{json .Containers}}}},\"images\":{{{{json .Images}}}}}}'",
+    "info_output": {
+      "required": [
+        "version",
+        "data_root"
+      ]
+    },
     "data_dirs": {
       "docker": "/var/lib/docker",
       "containerd": "/var/lib/containerd"
@@ -19,29 +32,108 @@
       "sh -c '. /etc/os-release && printf \"Types: deb\\nURIs: https://download.docker.com/linux/debian\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n\" \"$VERSION_CODENAME\" \"$(dpkg --print-architecture)\" > /etc/apt/sources.list.d/docker.sources'",
       "apt-get update"
     ],
-    "ps": "docker ps -a --no-trunc --format json",
+    "ps": "docker ps -a --no-trunc --format '{{\"id\":{{{{json .ID}}}},\"name\":{{{{json .Names}}}},\"image\":{{{{json .Image}}}},\"state\":{{{{json .State}}}},\"status\":{{{{json .Status}}}},\"published\":{{{{json .Ports}}}},\"created\":{{{{json .CreatedAt}}}}}}'",
+    "ports_pattern": "(?:[\\d.]+|\\[[0-9a-f:]*\\]):(?P<host>\\d+)->(?P<inner>\\d+)/(?P<proto>tcp|udp)",
+    "name_pattern": "[A-Za-z0-9][A-Za-z0-9_.-]{0,127}",
+    "name_hint": "container name or id",
+    "images": "docker image ls --format '{{\"id\":{{{{json .ID}}}},\"repository\":{{{{json .Repository}}}},\"tag\":{{{{json .Tag}}}},\"size\":{{{{json .Size}}}},\"created\":{{{{json .CreatedSince}}}},\"containers\":{{{{json .Containers}}}}}}'",
     "start": "docker start {container}",
     "stop": "docker stop {container}",
     "restart": "docker restart {container}",
     "remove": "docker rm {container}",
     "remove_force": "docker rm -f {container}",
     "logs": "docker logs --tail {lines} --timestamps {container}",
-    "images": "docker image ls --format json",
     "image_pull": "docker pull {image}",
     "image_remove": "docker image rm {image}",
     "image_prune": "docker image prune -f",
-    "run": "docker run -d {run_args} {image}",
+    "run": "xargs -0 docker run -d",
+    "run_words": {
+      "name": [
+        "--name",
+        "{name}"
+      ],
+      "restart": {
+        "no": [
+          "--restart",
+          "{restart}"
+        ],
+        "always": [
+          "--restart",
+          "{restart}"
+        ],
+        "unless-stopped": [
+          "--restart",
+          "{restart}"
+        ],
+        "on-failure": [
+          "--restart",
+          "{restart}"
+        ]
+      },
+      "port": {
+        "tcp": [
+          "-p",
+          "{bind}{host}:{inner}"
+        ],
+        "udp": [
+          "-p",
+          "{bind}{host}:{inner}/udp"
+        ]
+      },
+      "volume": {
+        "rw": [
+          "-v",
+          "{source}:{target}"
+        ],
+        "ro": [
+          "-v",
+          "{source}:{target}:ro"
+        ]
+      },
+      "env": [
+        "-e",
+        "{env}"
+      ],
+      "end": [
+        "{image}"
+      ],
+      "named_volumes": true
+    },
     "compose_check": "docker compose -p freedomnas-check --project-directory {dir} -f - config --quiet",
     "compose_write": "sh -c 'umask 022 && cat > \"$1\"' compose_write {file}",
     "compose_up": "docker compose -p {project} -f {file} up -d --remove-orphans",
     "compose_down": "docker compose -p {project} -f {file} down",
     "compose_pull": "docker compose -p {project} -f {file} pull",
     "compose_logs": "docker compose -p {project} -f {file} logs --tail {lines} --timestamps",
+    "app_members": "docker ps -a --filter label=com.docker.compose.project={project} --format '{{{{.Names}}}}'",
+    "app_members_output": {
+      "format": "lines",
+      "fields": {
+        "name": "{line}"
+      }
+    },
     "env_write": "sh -c 'umask 077 && cat > \"$1\"' env_write {file}",
     "folder_prepare": "install -d -o {uid} -g {gid} {path}",
-    "listening": "ss -Hltun",
-    "multi_args": [
-      "run_args"
-    ]
+    "listening": "ss -Hltun | awk '{{print $5}}'",
+    "listening_output": {
+      "format": "lines",
+      "fields": {
+        "address": "{line}"
+      }
+    },
+    "ui": {
+      "container": "container",
+      "app_tool": "Docker Compose",
+      "catalogue": true,
+      "name_required": false,
+      "volumes_label": "Volumes, one per line (volume or /path : /path in the container)",
+      "run_hint": "A named volume lives on the containers dataset. A path like /tank/media mounts a directory of your pool.",
+      "examples": {
+        "image": "nginx:alpine",
+        "ports": "8081:80",
+        "volumes": "webdata:/usr/share/nginx/html"
+      },
+      "app_example": "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"8080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html\n    restart: unless-stopped"
+    }
   }
 }
