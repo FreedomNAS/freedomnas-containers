@@ -61,7 +61,7 @@ def test_appjail_and_buildah_are_pointed_at_the_pools_datasets():
     [configure] = [kw for _, a, kw in bsd.calls if a == "configure"]
     assert (configure["arch"], configure["version"], configure["pool"]) == ("amd64", "15.1-RELEASE", "tank")
     assert [kw["service_name"] for c, a, kw in bsd.calls if (c, a) == ("services", "start")] == [
-        "pf", "dnsmasq"]
+        "pf", "dnsmasq", "appjail-dns"]
     assert bsd.actions().index("configure") < bsd.actions().index("start")
 
 
