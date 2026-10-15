@@ -21,7 +21,8 @@ with its data; the new compose file replaces the old one.
 
 What runs an app is the profile: `app_file` names the file (compose.yaml
 when it names none), `compose_check` checks it on stdin as if it were in
-the app's dataset, compose_up/down/pull/update/remove/logs run the project
+the app's dataset, `app_files` names other files an app is made of (written
+beside it, e.g. a Makejail), compose_up/down/pull/update/remove/logs run the project
 (update and remove fall back to pull + up and down when missing; logs to
 each member's own), and `app_members` prints the containers of a project,
 one record each (see records.py).
@@ -138,6 +139,33 @@ def app_file_name(engine) -> str:
     return _profile(engine, "app_file", COMPOSE_FILE)
 
 
+def app_files(engine) -> Dict[str, str]:
+    """The profile's `app_files`: other files an app is made of, key -> file name beside the app file."""
+    return dict(_profile(engine, "app_files", {}) or {})
+
+
+def _named_files(engine, files: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    allowed = app_files(engine)
+    unknown = sorted(set(files or {}) - set(allowed))
+    if unknown:
+        raise AppError(f"Unknown app file: {', '.join(unknown)}")
+    named = {}
+    for key, text in (files or {}).items():
+        if text is None:
+            continue
+        if not isinstance(text, str):
+            raise AppError(f"{allowed[key]} must be text")
+        if len(text.encode()) > MAX_COMPOSE:
+            raise AppError(f"{allowed[key]} is larger than 256 KiB")
+        named[allowed[key]] = text
+    return named
+
+
+def _write_files(engine, directory: str, named: Dict[str, str]) -> None:
+    for file_name, text in named.items():
+        engine.execute_with_stdin(CATEGORY, "compose_write", text, file=str(Path(directory) / file_name))
+
+
 def supported(engine) -> bool:
     return bool(_profile(engine, "compose_up"))
 
@@ -148,9 +176,9 @@ def compose_file(runtime, engine, dataset: str) -> str:
 
 def check_size(text: str) -> None:
     if not isinstance(text, str) or not text.strip():
-        raise AppError("The compose file is empty")
+        raise AppError("The app file is empty")
     if len(text.encode()) > MAX_COMPOSE:
-        raise AppError("The compose file is larger than 256 KiB")
+        raise AppError("The app file is larger than 256 KiB")
 
 
 def validate(engine, text: str, directory: str) -> None:
@@ -163,7 +191,7 @@ def validate(engine, text: str, directory: str) -> None:
     try:
         engine.execute_with_stdin(CATEGORY, "compose_check", text, timeout=60, dir=directory)
     except Exception as exc:
-        raise AppError(f"The compose file is not valid: {_stderr(exc)}")
+        raise AppError(f"{app_file_name(engine)} is not valid: {_stderr(exc)}")
 
 
 def _stderr(exc: Exception) -> str:
@@ -216,22 +244,28 @@ def read(runtime, engine, config, name: str) -> Dict[str, Any]:
     if not app:
         raise AppError(f"No app '{name}'")
     file = Path(compose_file(runtime, engine, app["dataset"]))
+    files = {}
+    for key, file_name in app_files(engine).items():
+        other = file.with_name(file_name)
+        files[key] = other.read_text() if other.exists() else ""
     return {"name": name, "dataset": app["dataset"], "state": app.get("state", "down"),
-            "compose": file.read_text() if file.exists() else ""}
+            "compose": file.read_text() if file.exists() else "", "files": files}
 
 
 def create(runtime, engine, config, name: str, text: str, extra: Optional[Dict[str, Any]] = None,
-           env_text: Optional[str] = None) -> None:
+           env_text: Optional[str] = None, files: Optional[Dict[str, Any]] = None) -> None:
     """
     Create the app's dataset (or take a kept one) with its compose file,
-    checked in the dataset; env_text, when given, is written first as its
-    .env (0600). A dataset created here is destroyed again on failure.
+    checked in the dataset, and the other `files` the profile allows;
+    env_text, when given, is written first as its .env (0600). A dataset
+    created here is destroyed again on failure.
     """
     check_name(name)
     if name in _apps(config):
         raise AppError(f"An app named '{name}' already exists")
     pool = _pool(config)
     check_size(text)
+    named = _named_files(engine, files)
     dataset = dataset_for(pool, name)
     _parent(runtime, engine, pool)
     reused = runtime.dataset_state(engine, dataset)["exists"]
@@ -242,6 +276,7 @@ def create(runtime, engine, config, name: str, text: str, extra: Optional[Dict[s
         if env_text is not None:
             engine.execute_with_stdin(CATEGORY, "env_write", env_text, file=str(Path(file).with_name(ENV_FILE)))
         validate(engine, text, str(Path(file).parent))
+        _write_files(engine, str(Path(file).parent), named)
         engine.execute_with_stdin(CATEGORY, "compose_write", text, file=file)
     except Exception:
         if not reused:
@@ -252,12 +287,14 @@ def create(runtime, engine, config, name: str, text: str, extra: Optional[Dict[s
     _save(config, apps)
 
 
-def update(runtime, engine, config, name: str, text: str) -> None:
+def update(runtime, engine, config, name: str, text: str, files: Optional[Dict[str, Any]] = None) -> None:
     app = _apps(config).get(check_name(name))
     if not app:
         raise AppError(f"No app '{name}'")
+    named = _named_files(engine, files)
     file = compose_file(runtime, engine, app["dataset"])
     validate(engine, text, str(Path(file).parent))
+    _write_files(engine, str(Path(file).parent), named)
     engine.execute_with_stdin(CATEGORY, "compose_write", text, file=file)
 
 

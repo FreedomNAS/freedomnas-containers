@@ -18,11 +18,12 @@ POST   /images/prune                    — remove the images no container uses 
 DELETE /images/{image}                  — remove one image
 
 GET    /apps                            — every app with its containers running
-POST   /apps                            — {name, compose, start}: a dataset <pool>/apps/<name>
-                                          holding the app file; start brings it up (a job)
-GET    /apps/{name}                     — the app and its compose file
-PUT    /apps/{name}                     — {compose}: replace the compose file; a running app
-                                          is brought up again with it (a job)
+POST   /apps                            — {name, compose, files, start}: a dataset <pool>/apps/<name>
+                                          holding the app file and the profile's app_files
+                                          ({key: text}); start brings it up (a job)
+GET    /apps/{name}                     — the app, its app file and its other files
+PUT    /apps/{name}                     — {compose, files}: replace them; a running app
+                                          is brought up again with them (a job)
 POST   /apps/{name}/{action}            — up, down, update (pull its images, then up) (jobs)
 GET    /apps/{name}/logs?lines=N        — the last N lines of every container of the app
 DELETE /apps/{name}?destroy_data=true   — take it down and forget it; destroy_data also
@@ -102,6 +103,7 @@ async def status(username: str = Depends(authenticate)):
     result = await asyncio.to_thread(runtime.status, engine, get_config())
     result["apps"] = apps.supported(engine)
     result["app_file"] = apps.app_file_name(engine)
+    result["app_files"] = apps.app_files(engine)
     result["job"] = dict(_job)
     return result
 
@@ -223,7 +225,8 @@ async def list_apps(username: str = Depends(authenticate)):
 async def create_app(body: dict, username: str = Depends(authenticate)):
     name = str(body.get("name") or "").strip()
     engine, config = get_engine(), get_config()
-    result = await _call(apps.create, runtime, engine, config, name, body.get("compose") or "")
+    result = await _call(apps.create, runtime, engine, config, name, body.get("compose") or "", None, None,
+                         body.get("files"))
     if isinstance(result, JSONResponse):
         return result
     if body.get("start"):
@@ -239,7 +242,7 @@ async def get_app(name: str, username: str = Depends(authenticate)):
 @router.put("/apps/{name}")
 async def replace_app(name: str, body: dict, username: str = Depends(authenticate)):
     engine, config = get_engine(), get_config()
-    result = await _call(apps.update, runtime, engine, config, name, body.get("compose") or "")
+    result = await _call(apps.update, runtime, engine, config, name, body.get("compose") or "", body.get("files"))
     if isinstance(result, JSONResponse):
         return result
     current = await _call(apps.read, runtime, engine, config, name)

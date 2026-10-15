@@ -87,6 +87,13 @@ function render() {
   nameHint.hidden = !ui.name_required;
   document.getElementById('f-run-name').required = !!ui.name_required;
   if (ui.app_example) document.getElementById('f-app-compose').placeholder = ui.app_example;
+  const examples = ui.file_examples || {};
+  document.getElementById('app-files').innerHTML = Object.entries(s.app_files || {}).map(([key, file]) => `
+        <div class="form-group">
+          <label for="f-app-file-${esc(key)}">${esc(file)}</label>
+          <textarea id="f-app-file-${esc(key)}" data-key="${esc(key)}" class="textarea font-mono app-file-text" rows="8"
+            spellcheck="false" placeholder="${esc(examples[key] || '')}"></textarea>
+        </div>`).join('');
   const hints = Object.assign({image: 'nginx:alpine', ports: '8081:80', volumes: 'webdata:/usr/share/nginx/html'},
                               ui.examples || {});
   document.getElementById('f-run-image').placeholder = hints.image;
@@ -342,6 +349,7 @@ async function openAppForm(name) {
       const app = await apiJSON('GET', `/api/containers/apps/${encodeURIComponent(name)}`);
       nameInput.value = app.name;
       document.getElementById('f-app-compose').value = app.compose;
+      document.querySelectorAll('.app-file-text').forEach(t => { t.value = (app.files || {})[t.dataset.key] || ''; });
     } catch (e) {
       toast(`Error: ${e.message}`, 'err');
       return;
@@ -354,14 +362,16 @@ async function saveApp(e) {
   e.preventDefault();
   const name = document.getElementById('f-app-name').value.trim();
   const compose = document.getElementById('f-app-compose').value;
+  const files = {};
+  document.querySelectorAll('.app-file-text').forEach(t => { files[t.dataset.key] = t.value; });
   const btn = document.getElementById('btn-app-submit');
   setLoading(btn, true, 'Checking…');
   try {
     if (_editing) {
-      await apiJSON('PUT', `/api/containers/apps/${encodeURIComponent(name)}`, { compose });
+      await apiJSON('PUT', `/api/containers/apps/${encodeURIComponent(name)}`, { compose, files });
     } else {
       await apiJSON('POST', '/api/containers/apps',
-                    { name, compose, start: document.getElementById('f-app-start').checked });
+                    { name, compose, files, start: document.getElementById('f-app-start').checked });
     }
     closeModal('modal-app');
     toast(_editing ? `${name} saved.` : `${name} created.`, 'ok');
