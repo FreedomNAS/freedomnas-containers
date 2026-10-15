@@ -1,17 +1,21 @@
 """
 The app catalogue: ready-made apps installed as ordinary apps (apps.py).
 
-Each entry is a directory under catalogue/ with `app.json` and a
-`compose.yaml` that reads its settings as ${VARIABLES}. Installing writes
-the compose file to the app's dataset, the settings to `.env` beside it
-(0600: it holds passwords), and creates the app's own folders owned by the
-account the app runs as.
+Each entry is a directory under catalogue/ with `app.json` and one recipe
+folder per runtime, named by the profile's `catalogue_recipe` (`linux`:
+compose.yaml; `freebsd`: appjail-director.yml, its Makejails and what they
+copy). The recipe reads the settings as ${VARIABLES} (Director: !ENV), and
+`APP` is the app's name. An entry without a recipe for this edition is
+listed as not available. Installing writes the recipe to the app's
+dataset, the settings to `.env` beside it (0600: it holds passwords), and
+creates the app's own folders owned by the account the app runs as.
 
 Setting types in app.json:
     port      a free TCP port on the NAS
     folder    ./name inside the app's dataset, or a directory of a pool;
-              offered at every UI level. "owner": "uid:gid" gives the
-              folder to that id instead of the app's user; "empty": a
+              offered at every UI level. "owner": "uid:gid" (or
+              {recipe: "uid:gid"}) gives the folder to that id instead of
+              the app's user; "empty": a
               directory of a pool must be empty or not exist yet (its
               parent on a pool), and is created and given to its owner
     user      a FreedomNAS account; writes its uid and gid to the keys
@@ -25,12 +29,18 @@ Setting types in app.json:
               "show" is set
     secret    always generated, never shown
 `fixed` holds values the user never changes; `prepare` lists folders
-created before the first start; `ports` lists ports used without a
+created before the first start ("./name", or {"path", "owner"} with the
+owner per recipe); `ports` lists ports used without a
 setting (host networking), `address_ports` ports published on one address
 setting only, which a service listening on loopback does not block.
 
 A reinstall on a kept dataset keeps the passwords and secrets of its old
 .env: the databases on the dataset were made with them.
+
+An app records the recipe it was installed with. When its pool comes back
+on an edition with another recipe, `adopt` writes the new one beside the
+data if app.json lists both under "portable" (the same files work with
+either runtime); otherwise the app stays down with a message.
 """
 
 from __future__ import annotations
@@ -95,9 +105,29 @@ def entry(entry_id: str, root: Path = ROOT) -> Dict[str, Any]:
     raise CatalogueError(f"No app '{entry_id}' in the catalogue")
 
 
-def summary(item: Dict[str, Any]) -> Dict[str, Any]:
+def recipe_name(engine) -> str:
+    try:
+        return engine.get_profile_value(CATEGORY, "catalogue_recipe") or ""
+    except Exception:
+        return ""
+
+
+def recipe(engine, item: Dict[str, Any], app_file: str = "") -> Optional[Path]:
+    """The entry's recipe folder for this edition, None when it has none."""
+    name = recipe_name(engine)
+    if not app_file:
+        try:
+            app_file = engine.get_profile_value(CATEGORY, "app_file") or "compose.yaml"
+        except Exception:
+            app_file = "compose.yaml"
+    folder = item["_dir"] / name if name else None
+    return folder if folder and (folder / app_file).is_file() else None
+
+
+def summary(item: Dict[str, Any], available: bool = True) -> Dict[str, Any]:
     return {key: item.get(key) for key in ("id", "name", "description", "website", "note")} | {
-        "settings": [s for s in item.get("settings", []) if s.get("type") != "secret"]}
+        "settings": [s for s in item.get("settings", []) if s.get("type") != "secret"],
+        "available": available}
 
 
 def _loopback(address: str) -> bool:
@@ -292,17 +322,25 @@ def _kept_secrets(item: Dict[str, Any], env_path: Path) -> Dict[str, str]:
             if s["type"] in ("password", "secret") and s["key"] in old}
 
 
-def _folders(item: Dict[str, Any], env: Dict[str, str]) -> List[tuple]:
+def _owner_for(owner: Any, recipe_name: str) -> Optional[tuple]:
+    if isinstance(owner, dict):
+        owner = owner.get(recipe_name)
+    return tuple(owner.split(":")) if owner else None
+
+
+def _folders(item: Dict[str, Any], env: Dict[str, str], recipe_name: str = "") -> List[tuple]:
     """Each folder to create before the first start, with its owner."""
     uid, gid = _owner(item, env)
-    folders = [(folder, uid, gid) for folder in item.get("prepare", [])]
+    folders = []
+    for entry in item.get("prepare", []):
+        path, owner = (entry, None) if isinstance(entry, str) else (entry["path"], entry.get("owner"))
+        folders.append((path, *(_owner_for(owner, recipe_name) or (uid, gid))))
     for setting in item.get("settings", []):
         value = env.get(setting["key"], "")
         if setting["type"] != "folder" or any(value == f[0] for f in folders):
             continue
         if value.startswith("./") or setting.get("empty"):
-            owner = setting["owner"].split(":") if setting.get("owner") else (uid, gid)
-            folders.append((value, *owner))
+            folders.append((value, *(_owner_for(setting.get("owner"), recipe_name) or (uid, gid))))
     return folders
 
 
@@ -325,6 +363,48 @@ def web_port(item: Dict[str, Any], env: Dict[str, str]) -> Optional[str]:
     return env.get(web.get("port", ""))
 
 
+def _write_recipe(engine, folder: Path, base: Path) -> None:
+    for path in sorted(folder.iterdir()):
+        if path.is_file():
+            engine.execute_with_stdin(CATEGORY, "compose_write", path.read_text(), file=str(base / path.name))
+
+
+def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
+    """
+    An app from the catalogue whose pool comes from another edition: when
+    the entry lists both recipes under "portable", write this edition's
+    recipe beside its data and .env, give the app's own folders (./name,
+    never a folder of the pool it only mounts) to this edition's owners,
+    and answer None; otherwise answer why it cannot start here.
+    """
+    if not app.get("catalogue"):
+        return f"{file} is missing"
+    try:
+        item = entry(app["catalogue"])
+    except CatalogueError as exc:
+        return str(exc)
+    here, was = recipe_name(engine), app.get("recipe") or "linux"
+    if here == was:
+        return f"{file} is missing"
+    base = Path(file).parent
+    folder = recipe(engine, item, base.joinpath(file).name)
+    if folder is None:
+        return f"{item['name']} is not available on this edition yet; its dataset is kept"
+    portable = item.get("portable") or []
+    if here not in portable or was not in portable:
+        return (f"{item['name']} was installed on another edition ({was}): its data cannot be used here. "
+                f"Remove it keeping its dataset, or install it again from the catalogue; the dataset is kept")
+    env_path = base / ENV_FILE
+    env = parse_env(env_path.read_text()) if env_path.exists() else {}
+    env["APP"] = name
+    engine.execute_with_stdin(CATEGORY, "env_write", render_env(env), file=str(env_path))
+    _write_recipe(engine, folder, base)
+    for path_text, uid, gid in _folders(item, env, here):
+        if path_text.startswith("./"):
+            engine.execute(CATEGORY, "folder_own", timeout=3600, uid=uid, gid=gid, path=str(base / path_text[2:]))
+    return None
+
+
 def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             values: Dict[str, str]) -> Dict[str, Any]:
     """
@@ -333,20 +413,36 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     """
     item = entry(entry_id)
     apps.check_name(name)
+    app_file = apps.app_file_name(engine)
+    folder = recipe(engine, item, app_file)
+    if folder is None:
+        raise CatalogueError(f"{item['name']} is not available on this edition yet")
     env = resolve(item, values, engine, config, used_ports(rt, engine, config=config),
                   used_ports(rt, engine, public_only=True, config=config))
-    text = (item["_dir"] / "compose.yaml").read_text()
+    env["APP"] = name
+    text = (folder / app_file).read_text()
+    editable = {file_name: key for key, file_name in apps.app_files(engine).items()}
+    files, others = {}, {}
+    for path in sorted(folder.iterdir()):
+        if path.is_file() and path.name != app_file:
+            if path.name in editable:
+                files[editable[path.name]] = path.read_text()
+            else:
+                others[path.name] = path.read_text()
     dataset = apps.dataset_for(config.get_module_config("containers").get("pool") or "", name)
     if runtime.dataset_state(engine, dataset)["exists"] and name not in (
             config.get_module_config("containers").get("apps") or {}):
         env.update(_kept_secrets(item, Path(apps.compose_file(runtime, engine, dataset)).with_name(ENV_FILE)))
     apps.create(runtime, engine, config, name, text,
-                extra={"catalogue": item["id"], "web_port": web_port(item, env), "ports": app_ports(item, env)},
-                env_text=render_env(env))
+                extra={"catalogue": item["id"], "recipe": recipe_name(engine),
+                       "web_port": web_port(item, env), "ports": app_ports(item, env)},
+                env_text=render_env(env), files=files)
     try:
         base = Path(apps.compose_file(runtime, engine, dataset)).parent
-        for folder, uid, gid in _folders(item, env):
-            path = base / folder[2:] if folder.startswith("./") else Path(folder)
+        for file_name, content in others.items():
+            engine.execute_with_stdin(CATEGORY, "compose_write", content, file=str(base / file_name))
+        for path_text, uid, gid in _folders(item, env, recipe_name(engine)):
+            path = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
             engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))
     except Exception:
         apps.remove(runtime, engine, config, name)

@@ -39,6 +39,7 @@ def load(stem: str):
 runtime = load("runtime")
 containers = load("containers")
 apps = load("apps")
+catalogue = load("catalogue")
 
 
 class ContainersModule(FreedomNASModule):
@@ -87,4 +88,5 @@ class ContainersModule(FreedomNASModule):
         results = runtime.reconcile(self._engine, desired, mode)
         if any(r.target_state == "failed" for r in results):
             return results
-        return results + apps.reconcile(runtime, containers, self._engine, desired)
+        adopt = lambda name, app, file: catalogue.adopt(self._engine, name, app, file)
+        return results + apps.reconcile(runtime, containers, self._engine, desired, adopt)

@@ -221,12 +221,15 @@ async function loadCatalogue() {
     grid.innerHTML = `<p class="text-muted">Could not read the catalogue: ${esc(e.message)}</p>`;
     return;
   }
-  grid.innerHTML = _catalogue.map(c => `
-    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+  const ordered = [..._catalogue.filter(c => c.available !== false), ..._catalogue.filter(c => c.available === false)];
+  grid.innerHTML = ordered.map(c => `
+    <div class="card" style="display:flex;flex-direction:column;gap:8px${c.available === false ? ';opacity:0.6' : ''}">
       <div class="font-bold">${esc(c.name)}</div>
       <div class="text-muted text-sm" style="flex:1">${esc(c.description)}</div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary btn-sm" data-entry="${esc(c.id)}">Install</button>
+        ${c.available === false
+          ? '<span class="badge badge-muted">Not on this edition yet</span>'
+          : `<button class="btn btn-primary btn-sm" data-entry="${esc(c.id)}">Install</button>`}
         <a class="text-sm" href="${esc(c.website)}" target="_blank" rel="noopener">Website</a>
       </div>
     </div>`).join('');

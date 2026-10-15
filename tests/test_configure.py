@@ -13,6 +13,7 @@ from conftest import REPO, CommandTranslationError
 
 PROFILE = json.loads((REPO / "profiles/containers/containers-freebsd.json").read_text())
 DATASETS = {"appjail": "tank/containers/appjail", "oci": "tank/containers/oci"}
+[PF] = [f for f in PROFILE["containers"]["config_files"] if f["path"] == "/etc/pf.conf"]
 
 
 class BSD:
@@ -48,7 +49,9 @@ class BSD:
 
 def test_appjail_and_buildah_are_pointed_at_the_pools_datasets():
     bsd = BSD()
-    assert runtime.configure(bsd, "tank", DATASETS) == ["appjail.conf", "storage.conf", "pf.conf"]
+    assert runtime.configure(bsd, "tank", DATASETS) == [
+        "appjail.conf", "storage.conf", "resolv.conf", "freedomnas-appjail-dnsmasq.conf", "pf.conf"]
+    assert bsd.files["/usr/local/etc/appjail/resolv.conf"].endswith("nameserver 10.231.0.1\n")
     conf = bsd.files["/usr/local/etc/appjail/appjail.conf"]
     assert "ZPOOL=tank\n" in conf and "ZROOTFS=containers/appjail\n" in conf
     assert "EXT_IF=fnas_bridge1\n" in conf and "FREEBSD_VERSION=15.1-RELEASE\n" in conf
@@ -57,7 +60,8 @@ def test_appjail_and_buildah_are_pointed_at_the_pools_datasets():
     assert 'graphroot = "/var/db/containers/storage"' in storage
     [configure] = [kw for _, a, kw in bsd.calls if a == "configure"]
     assert (configure["arch"], configure["version"], configure["pool"]) == ("amd64", "15.1-RELEASE", "tank")
-    assert ("services", "start", {"service_name": "pf"}) in bsd.calls
+    assert [kw["service_name"] for c, a, kw in bsd.calls if (c, a) == ("services", "start")] == [
+        "pf", "dnsmasq"]
     assert bsd.actions().index("configure") < bsd.actions().index("start")
 
 
@@ -70,7 +74,7 @@ def test_a_second_run_writes_nothing():
 
 
 def test_pf_gets_the_anchors_and_a_pass_rule_when_it_has_none():
-    entry = PROFILE["containers"]["config_files"][2]
+    entry = PF
     assert runtime.file_text("", entry, {}).splitlines() == [
         "# freedomnas appjail begin",
         'nat-anchor "appjail-nat/jail/*"',
@@ -82,7 +86,7 @@ def test_pf_gets_the_anchors_and_a_pass_rule_when_it_has_none():
 
 
 def test_a_users_pf_rules_stay_and_keep_their_own_policy():
-    entry = PROFILE["containers"]["config_files"][2]
+    entry = PF
     mine = "set skip on lo0\nblock in all\npass out all keep state\n"
     text = runtime.file_text(mine, entry, {})
     assert text.endswith(mine) and "pass all" not in text

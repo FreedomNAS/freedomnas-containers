@@ -11,5 +11,7 @@
     {"key": "SIGNUPS", "label": "Anyone can sign up", "type": "choice", "choices": ["false", "true"], "default": "true"},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}
   ],
+  "prepare": [{"path": "./data", "owner": {"freebsd": "80:80"}}],
+  "portable": ["linux", "freebsd"],
   "note": "Browsers open the web vault only over HTTPS (or on the NAS itself): put it behind a reverse proxy with a certificate before using it from other devices."
 }

@@ -279,7 +279,9 @@ async def remove_app(name: str, destroy_data: bool = False, username: str = Depe
 
 @router.get("/catalogue")
 async def list_catalogue(username: str = Depends(authenticate)):
-    return {"entries": [catalogue.summary(item) for item in catalogue.entries()]}
+    engine = get_engine()
+    return {"entries": [catalogue.summary(item, catalogue.recipe(engine, item) is not None)
+                        for item in catalogue.entries()]}
 
 
 def _catalogue_entry(entry_id: str, username: str) -> dict:
@@ -291,7 +293,7 @@ def _catalogue_entry(entry_id: str, username: str) -> dict:
     n = 2
     while name in installed:
         name, n = f"{item['id']}{n}", n + 1
-    return {**catalogue.summary(item), "app_name": name,
+    return {**catalogue.summary(item, catalogue.recipe(engine, item) is not None), "app_name": name,
             "defaults": catalogue.defaults(item, config, username, taken),
             "users": catalogue._accounts(config),
             "folders": catalogue.pool_folders(engine)}

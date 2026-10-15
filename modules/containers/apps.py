@@ -203,14 +203,15 @@ def _compose(engine, action: str, name: str, file: str, timeout: int = UP_TIMEOU
     return engine.execute(CATEGORY, action, timeout=timeout, project=name, file=file, **kw)
 
 
-def member_names(engine, name: str) -> List[str]:
+def member_names(engine, name: str, file: str) -> List[str]:
     """The names of the containers of the app `name`, as `app_members` gives them."""
-    return [row["name"] for row in records.run(engine, CATEGORY, "app_members", project=name) if row.get("name")]
+    return [row["name"] for row in records.run(engine, CATEGORY, "app_members", project=name, file=file)
+            if row.get("name")]
 
 
-def members(engine, containers: List[Dict[str, Any]], name: str) -> List[Dict[str, Any]]:
+def members(runtime, engine, containers: List[Dict[str, Any]], name: str, app: Dict[str, Any]) -> List[Dict[str, Any]]:
     try:
-        names = set(member_names(engine, name))
+        names = set(member_names(engine, name, compose_file(runtime, engine, app["dataset"])))
     except Exception:
         return []
     return [c for c in containers if c.get("name") in names]
@@ -224,7 +225,7 @@ def listing(runtime, rt, engine, config) -> List[Dict[str, Any]]:
         pass
     result = []
     for name, app in sorted(_apps(config).items()):
-        own = members(engine, containers, name)
+        own = members(runtime, engine, containers, name, app)
         running = sum(1 for c in own if c["state"] == "running")
         result.append({
             "name": name,
@@ -331,7 +332,7 @@ def logs(runtime, engine, config, name: str, lines: int = 200, rt=None) -> str:
     lines = max(1, min(int(lines), 5000))
     if not _profile(engine, "compose_logs"):
         parts = []
-        for member in member_names(engine, name):
+        for member in member_names(engine, name, compose_file(runtime, engine, app["dataset"])):
             parts.append(f"== {member}\n" + rt.logs(engine, member, lines))
         return "\n".join(parts)
     out, err = _compose(engine, "compose_logs", name, compose_file(runtime, engine, app["dataset"]),
@@ -360,10 +361,19 @@ def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:
                         target_state="failed" if error else "applied", error=error)
 
 
-def reconcile(runtime, rt, engine, desired: Dict[str, Any]) -> List[ActionResult]:
+def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None) -> List[ActionResult]:
+    """
+    Bring up every app recorded as up whose containers are not all running,
+    and take down every app recorded as down whose containers run (a
+    runtime may start them at boot by itself). An app whose file for this
+    runtime is missing (its pool came from another edition) is handed to
+    `adopt(name, app, file)`, which writes the file or answers why it
+    cannot.
+    """
     apps = desired.get("apps") or {}
     wanted = {name: app for name, app in apps.items() if app.get("state") == "up"}
-    if not wanted or not desired.get("enabled"):
+    stopped = {name: app for name, app in apps.items() if app.get("state") != "up"}
+    if not apps or not desired.get("enabled"):
         return []
     if runtime.info(engine) is None:
         return [_result(name, f"{runtime.runtime_name(engine)} is not running", app=name)
@@ -373,16 +383,28 @@ def reconcile(runtime, rt, engine, desired: Dict[str, Any]) -> List[ActionResult
     except Exception as exc:
         return [_result("list", str(exc))]
     results: List[ActionResult] = []
+    for name, app in sorted(stopped.items()):
+        own = members(runtime, engine, containers, name, app)
+        if not any(c["state"] == "running" for c in own):
+            continue
+        try:
+            check_name(name)
+            _compose(engine, "compose_down", name, compose_file(runtime, engine, app["dataset"]))
+            results.append(_result(f"{name}.down", app=name))
+        except Exception as exc:
+            results.append(_result(f"{name}.down", _stderr(exc), app=name))
     for name, app in sorted(wanted.items()):
-        own = members(engine, containers, name)
+        own = members(runtime, engine, containers, name, app)
         if own and all(c["state"] == "running" for c in own):
             continue
         try:
             check_name(name)
             file = compose_file(runtime, engine, app["dataset"])
             if not Path(file).exists():
-                results.append(_result(name, f"{file} is missing", app=name))
-                continue
+                problem = adopt(name, app, file) if adopt else f"{file} is missing"
+                if problem:
+                    results.append(_result(name, problem, app=name))
+                    continue
             _compose(engine, "compose_up", name, file)
             results.append(_result(name, app=name))
         except Exception as exc:

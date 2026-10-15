@@ -7,8 +7,8 @@ FreedomNAS documentation.
 
 Docker runs from the edition's own packages, on every Linux edition
 (Debian, Arch, Artix, Void, Gentoo). On FreeBSD the runtime is AppJail:
-containers are jails, apps are AppJail Director projects; the catalogue
-follows.
+containers are jails, apps are AppJail Director projects, and the catalogue
+has Jellyfin, Nextcloud and Vaultwarden.
 
 The golden rule holds here as in the core: the Python code knows no
 runtime. Every command, its arguments, the way its output reads, the files
@@ -52,12 +52,35 @@ new profile, not new code (see *Profile keys* below).
   so its `.env` and relative paths are those it will run with.
 - **Catalogue**: ready-made apps (Home Assistant, Immich, Jellyfin,
   Nextcloud, Pi-hole, Vaultwarden) in `modules/containers/catalogue/<id>/`,
-  each an `app.json` (settings and their types, see `catalogue.py`) and a
-  `compose.yaml` reading them as `${VARIABLES}`. Installing one creates an
+  each an `app.json` (settings and their types, see `catalogue.py`) and one
+  recipe folder per runtime, named by the profile's `catalogue_recipe`:
+  `linux/compose.yaml`, `freebsd/appjail-director.yml` with its Makejails
+  (and what they copy, such as a `template.conf`). Both read the same
+  settings (`${VARIABLES}`, Director `!ENV`); `APP` is the app's name. An
+  entry without a recipe for the edition is listed as not available
+  (FreeBSD today: Jellyfin, Nextcloud, Vaultwarden). Installing one creates an
   ordinary app whose `.env` (0600) holds the settings; ports are checked
   against what listens on the NAS (`listening`), what containers publish and the
   ports of catalogue apps that are down; passwords are generated, shown
   once, and kept when an app is installed again on its kept dataset.
+
+- **Apps between editions**: an app records the recipe it was installed
+  with. When its pool is imported on an edition with another runtime, the
+  reconciler writes that edition's recipe beside the data and `.env` and
+  gives the app's own folders to that edition's owners, if `app.json` lists
+  both recipes under `portable` (Vaultwarden today: the same SQLite files
+  work on both); otherwise the app stays down with a message and its
+  dataset is kept. Verified Debian (Docker) → FreeBSD (AppJail) with a
+  user created before the move.
+- **Apps stay as recorded**: an app recorded as stopped is stopped again at
+  boot if a runtime started its containers by itself (AppJail starts jails
+  with the boot flag).
+
+FreeBSD Makejails in the catalogue are copied 1:1 from
+[AppJail-makejails](https://github.com/AppJail-makejails) (jellyfin
+518f7b8, nextcloud 6ca2abc, mariadb c6c715e, 2026-10-15), with the
+`template.conf` their READMEs give. Vaultwarden has none there: its
+Makejail is ours (the FreeBSD package, `rc.conf.d` from the app's `.env`).
 
 Configuration, `modules.containers` in `config.yaml`:
 
@@ -116,7 +139,8 @@ Each `containers-<os>.json` holds, under `containers`:
 | `error_filter` | `{keep, context, strip}`: the stderr lines that name the cause |
 | `listening` + `listening_output` | records `address` (`host:port`) of what listens on the NAS |
 | `app_file`, `compose_check`, `compose_write`, `compose_up`, `compose_down`, `compose_pull`, `compose_update`, `compose_remove`, `compose_logs`, `app_members` | apps: file name, checker (stdin, `{dir}`), project commands (`{project}`, `{file}`), the project's containers |
-| `env_write`, `folder_prepare` | catalogue `.env` and folders |
+| `env_write`, `folder_prepare`, `folder_own` | catalogue `.env`, folders, owners after a move (recursive) |
+| `catalogue_recipe`, `app_files` | the catalogue recipe folder of this edition; files of an app beside its app file (key -> name), edited in the WebUI |
 | `ui` | words and examples for the page: `container`, `app_tool`, `catalogue`, `name_required`, `volumes_label`, `run_hint`, `examples`, `app_example` |
 
 `<action>_output` (see `records.py`): `format` jsonl (default), json

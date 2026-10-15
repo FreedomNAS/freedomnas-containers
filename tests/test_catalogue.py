@@ -50,17 +50,19 @@ def test_every_entry_is_complete():
     ids = [e["id"] for e in catalogue.entries()]
     assert ids == ["homeassistant", "immich", "jellyfin", "nextcloud", "pihole", "vaultwarden"]
     for item in catalogue.entries():
-        compose = (item["_dir"] / "compose.yaml").read_text()
-        used = set(re.findall(r"\$\{([A-Z_]+)", compose))
         provided = {s["key"] for s in item["settings"] if s["type"] != "user"} | set(item.get("fixed", {}))
         provided |= {s[k] for s in item["settings"] if s["type"] == "user" for k in ("uid", "gid")}
-        assert used <= provided, (item["id"], used - provided)
+        provided |= {"APP"}
+        for recipe in [d for d in item["_dir"].iterdir() if d.is_dir()]:
+            for file in recipe.iterdir():
+                used = set(re.findall(r"\$\{([A-Z_]+)", file.read_text()))
+                assert used <= provided, (item["id"], file.name, used - provided)
         assert item["web"]["port"] in provided or item["web"].get("fixed"), item["id"]
 
 
 def test_no_entry_names_its_containers_or_project():
     for item in catalogue.entries():
-        compose = (item["_dir"] / "compose.yaml").read_text()
+        compose = (item["_dir"] / "linux/compose.yaml").read_text()
         assert "container_name" not in compose and not compose.startswith("name:"), item["id"]
 
 
@@ -157,7 +159,7 @@ def test_compose_files_are_valid_for_docker_compose(tmp_path):
                "MEDIA": "./m", "UPLOAD_LOCATION": "./l", "PUID": "1000", "PGID": "1000"} | item.get("fixed", {})
         folder = tmp_path / item["id"]
         folder.mkdir()
-        (folder / "compose.yaml").write_text((item["_dir"] / "compose.yaml").read_text())
+        (folder / "compose.yaml").write_text((item["_dir"] / "linux/compose.yaml").read_text())
         (folder / ".env").write_text(catalogue.render_env(env))
         run = subprocess.run(["docker", "compose", "-f", str(folder / "compose.yaml"), "config", "--quiet"],
                              capture_output=True, text=True)
@@ -165,7 +167,7 @@ def test_compose_files_are_valid_for_docker_compose(tmp_path):
         profile = json.loads((Path(catalogue.__file__).parents[2] / "profiles/containers/containers-debian.json")
                              .read_text())["containers"]["compose_check"]
         argv = profile.replace("{dir}", str(folder)).split()
-        run = subprocess.run(argv, input=(item["_dir"] / "compose.yaml").read_text(),
+        run = subprocess.run(argv, input=(item["_dir"] / "linux/compose.yaml").read_text(),
                              capture_output=True, text=True, cwd="/")
         assert run.returncode == 0, (item["id"], "stdin", run.stderr)
 
@@ -202,7 +204,7 @@ def test_a_failed_check_with_the_env_leaves_no_dataset(nas, config):
 def test_editing_an_app_checks_it_in_its_dataset(nas, config):
     install(nas, config, "jellyfin")
     nas.calls.clear()
-    compose = (catalogue.entry("jellyfin")["_dir"] / "compose.yaml").read_text()
+    compose = (catalogue.entry("jellyfin")["_dir"] / "linux/compose.yaml").read_text()
     apps.update(runtime, nas, config, "jellyfin", compose)
     [check] = [kw for c, a, kw in nas.calls if a == "compose_check"]
     assert (Path(check["dir"]) / ".env").exists()

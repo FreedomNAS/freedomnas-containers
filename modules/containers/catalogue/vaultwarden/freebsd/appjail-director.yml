@@ -1,0 +1,18 @@
+options:
+  - virtualnet: "fnasjails:<random> default"
+  - nat:
+services:
+  vaultwarden:
+    name: !ENV '${APP}-vaultwarden'
+    makejail: ./Makejail
+    options:
+      - expose: !ENV '${PORT}:8000'
+    volumes:
+      - data: /var/db/vaultwarden
+      - app: /mnt/app
+volumes:
+  data:
+    device: ./data
+  app:
+    device: .
+    options: ro

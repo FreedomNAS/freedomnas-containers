@@ -1,0 +1,27 @@
+options:
+  - virtualnet: "fnasjails:<random> default"
+  - nat:
+services:
+  jellyfin:
+    name: !ENV '${APP}-jellyfin'
+    makejail: ./Makejail
+    options:
+      - template: ./template.conf
+      - expose: !ENV '${PORT}:8096'
+    volumes:
+      - config: /var/db/jellyfin
+      - cache: /var/cache/jellyfin
+      - media: /media
+    oci:
+      environment:
+        - PUID: !ENV '${PUID}'
+        - PGID: !ENV '${PGID}'
+        - TZ: !ENV '${TZ}'
+volumes:
+  config:
+    device: ./config
+  cache:
+    device: ./cache
+  media:
+    device: !ENV '${MEDIA}'
+    options: ro

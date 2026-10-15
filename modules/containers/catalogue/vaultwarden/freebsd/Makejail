@@ -1,0 +1,7 @@
+OPTION start
+OPTION overwrite=force
+
+PKG vaultwarden
+SYSRC vaultwarden_enable=YES
+COPY vaultwarden.rc /usr/local/etc/rc.conf.d/vaultwarden
+SERVICE vaultwarden restart

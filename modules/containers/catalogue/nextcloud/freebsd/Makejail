@@ -1,0 +1,6 @@
+ARG nextcloud_from=ghcr.io/appjail-makejails/nextcloud
+ARG nextcloud_tag=latest
+
+OPTION container=boot
+OPTION overwrite=force
+OPTION from=${nextcloud_from}:${nextcloud_tag}

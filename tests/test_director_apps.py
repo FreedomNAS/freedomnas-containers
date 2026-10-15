@@ -103,3 +103,58 @@ def test_reconcile_brings_up_a_project_whose_jails_are_down(bsd, config):
     desired = {"enabled": True, "apps": {"site": {"dataset": "tank/apps/site", "state": "up"}}}
     [result] = apps.reconcile(runtime, containers, bsd, desired)
     assert result.target_state == "applied" and bsd.actions()[-1] == "containers.compose_up"
+
+
+def linux_app(bsd, name, catalogue_id):
+    """A catalogue app as a Linux edition left it on the pool: compose.yaml, .env, data."""
+    import catalogue
+    base = bsd.tmp / "mnt" / f"tank/apps/{name}"
+    (base / "data").mkdir(parents=True)
+    (base / "data" / "db.sqlite3").write_text("vault")
+    (base / "compose.yaml").write_text((catalogue.entry(catalogue_id)["_dir"] / "linux/compose.yaml").read_text())
+    (base / ".env").write_text("PORT='8222'\nADMIN_TOKEN='secret-token'\nSIGNUPS='false'\nTZ='Europe/Rome'\n")
+    bsd.datasets[f"tank/apps/{name}"] = {"mountpoint": str(base), "mounted": "yes", "canmount": "on"}
+    return base, {"dataset": f"tank/apps/{name}", "state": "up", "catalogue": catalogue_id, "web_port": "8222"}
+
+
+def test_a_portable_app_from_linux_gets_this_editions_recipe(bsd):
+    import catalogue
+    base, app = linux_app(bsd, "vw", "vaultwarden")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    desired = {"enabled": True, "apps": {"vw": app}}
+    adopt = lambda name, record, file: catalogue.adopt(bsd, name, record, file)
+    [result] = apps.reconcile(runtime, containers, bsd, desired, adopt)
+    assert result.target_state == "applied" and bsd.actions()[-1] == "containers.compose_up"
+    assert {"appjail-director.yml", "Makejail", "vaultwarden.rc"} <= {p.name for p in base.iterdir()}
+    env = catalogue.parse_env((base / ".env").read_text())
+    assert env["APP"] == "vw" and env["ADMIN_TOKEN"] == "secret-token"
+    assert ("containers", "folder_own", {"uid": "80", "gid": "80", "path": str(base / "data")}) in bsd.calls
+    assert (base / "data" / "db.sqlite3").read_text() == "vault"
+
+
+def test_an_app_whose_data_does_not_move_stays_down_with_a_reason(bsd):
+    import catalogue
+    base, app = linux_app(bsd, "films", "jellyfin")
+    problem = catalogue.adopt(bsd, "films", app, str(base / "appjail-director.yml"))
+    assert "cannot be used here" in problem
+    assert not (base / "appjail-director.yml").exists()
+    assert "folder_own" not in [a for _, a, _ in bsd.calls]
+
+
+def test_a_missing_file_on_the_same_edition_is_only_reported(bsd):
+    import catalogue
+    base, app = linux_app(bsd, "vw", "vaultwarden")
+    app["recipe"] = "freebsd"
+    assert catalogue.adopt(bsd, "vw", app, str(base / "appjail-director.yml")).endswith("is missing")
+
+
+def test_a_stopped_app_whose_jails_started_at_boot_is_taken_down(bsd, config):
+    apps.create(runtime, bsd, config, "site", DIRECTOR, files={"makejail": MAKEJAIL})
+    bsd.outputs[("containers", "ps")] = (JAILS, "")
+    bsd.outputs[("containers", "app_members")] = (DESCRIBE, "")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    desired = {"enabled": True, "apps": {"site": {"dataset": "tank/apps/site", "state": "down"}}}
+    [result] = apps.reconcile(runtime, containers, bsd, desired)
+    assert result.action == "containers.apps.site.down" and bsd.actions()[-1] == "containers.compose_down"
+    bsd.outputs[("containers", "ps")] = (JAILS.replace("site-web\tUP", "site-web\tDOWN"), "")
+    assert apps.reconcile(runtime, containers, bsd, desired) == []
