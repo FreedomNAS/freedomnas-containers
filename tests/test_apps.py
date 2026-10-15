@@ -199,3 +199,22 @@ def test_the_module_brings_apps_up_after_the_runtime(engine, config):
 def test_published_ports_are_shown_once_and_short():
     text = "0.0.0.0:8090->80/tcp, [::]:8090->80/tcp, 10.0.2.15:53->53/udp, 0.0.0.0:8091->80/tcp"
     assert docker.short_ports(text) == "8090→80, 53→53/udp, 8091→80"
+
+
+def test_a_pool_mounted_nowhere_gives_the_apps_a_mountpoint(engine, config):
+    engine.datasets["tank"] = {"mountpoint": "none", "mounted": "no", "canmount": "on"}
+    apps.create(runtime, engine, config, "web", COMPOSE)
+    assert engine.datasets["tank/apps"]["mountpoint"] == "/tank/apps"
+
+
+def test_an_apps_dataset_without_mountpoint_gets_one(engine, config):
+    engine.datasets["tank/apps"] = {"mountpoint": "none", "mounted": "no", "canmount": "on"}
+    apps.create(runtime, engine, config, "web", COMPOSE)
+    assert engine.datasets["tank/apps"]["mountpoint"] == "/tank/apps"
+
+
+def test_a_mounted_pool_leaves_the_apps_dataset_to_inherit(engine, config):
+    engine.datasets["tank"] = {"mountpoint": "/tank", "mounted": "yes", "canmount": "on"}
+    apps.create(runtime, engine, config, "web", COMPOSE)
+    assert "zfs.dataset_set" not in engine.actions()
+    assert [kw["dataset"] for c, a, kw in engine.calls if a == "dataset_create_with"] == ["tank/apps/web"]

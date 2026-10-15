@@ -16,13 +16,19 @@ later.
   freedomnas-profiles' `packages/containers.json` for the edition and init.
 - **Put Docker's data on a pool**: every directory in the profile's
   `data_dirs` (`/var/lib/docker`, `/var/lib/containerd`) is mounted from a
-  dataset `<pool>/containers/<name>` with `canmount=noauto`. Docker's own
+  dataset `<pool>/containers/<name>` with `canmount=on`, so a pool imported
+  at boot has them mounted by the system's ZFS mount service before any
+  service starts, even one that pulls Docker in early. Docker's own
   configuration and image store are left as they are. What a directory
-  held is moved aside to `<dir>.pre-freedomnas` and copied onto the
-  dataset; the old copy is never deleted.
+  held is moved aside to `<dir>.pre-freedomnas` (`<dir>.pre-freedomnas-<date>`
+  when that exists already) and copied onto the dataset; the old copies
+  are never deleted.
 - **Start Docker after the pool**: Docker, containerd and `docker.socket`
-  are kept from starting at boot; `reconcile()` mounts the datasets and
-  then starts them, at every boot and after a restore.
+  are kept from starting at boot by themselves; `reconcile()` mounts the
+  datasets of a pool it imported and then starts them, at every boot and
+  after a restore.
+- **Apps on a pool mounted nowhere**: when the pool has `mountpoint=none`
+  or `legacy`, `<pool>/apps` gets `mountpoint=/<pool>/apps`.
 - **Containers and images**: list, start, stop, restart, logs and remove
   containers; download, remove and prune images; run a container from an
   image with ports, volumes, environment and a restart policy (Expert).

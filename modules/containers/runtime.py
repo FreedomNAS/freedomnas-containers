@@ -7,13 +7,16 @@ dataset, so containers and images survive a rollback of the system and go
 along with the pool's snapshots and replication; Docker's own
 configuration is left as it is, whichever image store it uses.
 
-The datasets are `canmount=noauto` and Docker is kept from starting at
-boot: the pool may be imported only by the reconciler, and a daemon
-started before the datasets are mounted would write into the root
-dataset. The module's reconcile() mounts them and then starts Docker.
+The datasets are `canmount=on`, so a pool imported at boot gets them
+mounted by the system's own ZFS mount service before any service starts,
+also when something that needs Docker (a CI runner, say) starts it early.
+Docker is still kept from starting at boot by itself: a pool imported
+only by the reconciler has its datasets mounted by the module's
+reconcile(), which then starts Docker.
 
 What a directory held before setup is moved aside to `<dir>.pre-freedomnas`
-and copied onto its dataset; the old copy is never deleted by the module.
+(or `<dir>.pre-freedomnas-<date>` when that exists already) and copied
+onto its dataset; the old copies are never deleted by the module.
 
 Configuration, `modules.containers`:
     enabled   bool  the runtime was set up from the WebUI
@@ -160,6 +163,13 @@ def _has_entries(path: str) -> bool:
         return False
 
 
+def mount_at_boot(engine, dataset: str) -> List[str]:
+    if _property(engine, dataset, "canmount") == "on":
+        return []
+    engine.execute("zfs", "dataset_set", property="canmount", value="on", dataset=dataset)
+    return ["canmount=on"]
+
+
 def place(engine, dataset: str, path: str) -> List[str]:
     """
     Mount `dataset` on `path`, creating it when missing; whatever `path`
@@ -171,16 +181,20 @@ def place(engine, dataset: str, path: str) -> List[str]:
     if state["mounted"]:
         if state["mountpoint"] != path:
             raise ContainersError(f"{dataset} is mounted on {state['mountpoint']}, not {path}")
-        return done
+        return done + mount_at_boot(engine, dataset)
     if not state["exists"]:
         engine.execute("zfs", "dataset_create_with",
-                       options=f"-p -o canmount=noauto -o mountpoint={path}", dataset=dataset)
+                       options=f"-p -o mountpoint={path}", dataset=dataset)
         done.append("created")
     elif state["mountpoint"] != path:
         raise ContainersError(f"{dataset} belongs on {state['mountpoint']}, not {path}")
+    else:
+        done += mount_at_boot(engine, dataset)
     aside = None
     if _has_entries(path):
         aside = path + ASIDE
+        if Path(aside).exists():
+            aside = f"{path}{ASIDE}-{time.strftime('%Y%m%d-%H%M%S')}"
         if Path(aside).exists():
             raise ContainersError(f"{path} is not empty and {aside} already exists")
         engine.execute(CATEGORY, "data_move", source=path, target=aside)
@@ -285,6 +299,9 @@ def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative") -> Lis
     dirs = data_dirs(engine)
     try:
         unmounted = [name for name, ds in datasets.items() if not dataset_state(engine, ds)["mounted"]]
+        for name, ds in datasets.items():
+            if name not in unmounted and mount_at_boot(engine, ds):
+                results.append(_result("dataset", dataset=ds, path=dirs.get(name), done="canmount=on"))
         if unmounted:
             stop(engine)
         for name in unmounted:

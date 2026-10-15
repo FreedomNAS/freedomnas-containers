@@ -71,7 +71,7 @@ class FakeEngine:
             ds = self.datasets.get(kw["dataset"])
             if ds is None:
                 raise CommandExecutionError("dataset does not exist")
-            return f"{ds[kw['property']]}\tlocal", ""
+            return f"{ds.get(kw['property'], '-')}\tlocal", ""
         if key == ("zfs", "dataset_create_with"):
             props = dict(w.split("=", 1) for w in kw["options"].split() if "=" in w)
             if "mountpoint" in props:
@@ -81,6 +81,9 @@ class FakeEngine:
                 mountpoint = self.tmp / "mnt" / kw["dataset"]
                 mountpoint.mkdir(parents=True, exist_ok=True)
                 self.datasets[kw["dataset"]] = {"mountpoint": str(mountpoint), "mounted": "yes", "canmount": "on"}
+            return "", ""
+        if key == ("zfs", "dataset_set"):
+            self.datasets[kw["dataset"]][kw["property"]] = kw["value"]
             return "", ""
         if key == ("zfs", "dataset_destroy_recursive"):
             ds = self.datasets.pop(kw["dataset"])

@@ -76,6 +76,23 @@ def dataset_for(pool: str, name: str) -> str:
     return f"{pool}/apps/{name}"
 
 
+def _parent(runtime, engine, pool: str) -> None:
+    """
+    Give `<pool>/apps` a mountpoint of its own when it would inherit none
+    from a pool mounted nowhere (`mountpoint=none` or `legacy`).
+    """
+    parent = f"{pool}/apps"
+    fallback = f"/{pool}/apps"
+    state = runtime.dataset_state(engine, parent)
+    if state["exists"]:
+        if not (state["mountpoint"] or "").startswith("/"):
+            engine.execute("zfs", "dataset_set", property="mountpoint", value=fallback, dataset=parent)
+        return
+    pool_mountpoint = runtime.dataset_state(engine, pool)["mountpoint"]
+    if pool_mountpoint and not pool_mountpoint.startswith("/"):
+        engine.execute("zfs", "dataset_create_with", options=f"-p -o mountpoint={fallback}", dataset=parent)
+
+
 def _mountpoint(runtime, engine, dataset: str) -> str:
     state = runtime.dataset_state(engine, dataset)
     if not state["exists"]:
@@ -164,6 +181,7 @@ def create(runtime, engine, config, name: str, text: str, extra: Optional[Dict[s
     pool = _pool(config)
     check_size(text)
     dataset = dataset_for(pool, name)
+    _parent(runtime, engine, pool)
     reused = runtime.dataset_state(engine, dataset)["exists"]
     if not reused:
         engine.execute("zfs", "dataset_create_with", options="-p", dataset=dataset)

@@ -18,7 +18,7 @@ def test_setup_mounts_a_dataset_on_every_data_directory(engine):
     result = runtime.setup(engine, config, "tank")
     assert config.section == {"enabled": True, "pool": "tank", "datasets": DATASETS}
     for name, ds in DATASETS.items():
-        assert engine.datasets[ds] == {"mountpoint": engine.path(name), "mounted": "yes", "canmount": "noauto"}
+        assert engine.datasets[ds] == {"mountpoint": engine.path(name), "mounted": "yes", "canmount": "on"}
     assert result["running"] and [d["mounted"] for d in result["datasets"]] == [True, True]
 
 
@@ -54,9 +54,13 @@ def test_empty_directories_are_not_copied(engine):
 def test_a_previous_copy_set_aside_is_never_overwritten(engine):
     old = Path(engine.path("docker"))
     (old / "x").mkdir(parents=True)
-    Path(str(old) + runtime.ASIDE).mkdir()
-    with pytest.raises(runtime.ContainersError):
-        runtime.setup(engine, FakeConfig(), "tank")
+    previous = Path(str(old) + runtime.ASIDE)
+    previous.mkdir()
+    (previous / "kept").write_text("first copy")
+    runtime.setup(engine, FakeConfig(), "tank")
+    assert (previous / "kept").read_text() == "first copy"
+    [dated] = [p for p in old.parent.iterdir() if p.name.startswith(previous.name + "-")]
+    assert (dated / "x").is_dir()
 
 
 def test_setup_refuses_a_pool_that_is_not_imported(engine):
@@ -174,3 +178,24 @@ def test_status_reports_the_runtime_and_its_datasets(engine):
     assert s["pools"] == ["rpool", "tank"]
     assert [(d["name"], d["dataset"], d["mounted"]) for d in s["datasets"]] == [
         ("docker", "tank/containers/docker", True), ("containerd", "tank/containers/containerd", True)]
+
+
+def test_reconcile_lets_the_system_mount_old_noauto_datasets_at_boot(engine):
+    runtime.setup(engine, FakeConfig(), "tank")
+    for ds in DATASETS.values():
+        engine.datasets[ds]["canmount"] = "noauto"
+    engine.calls.clear()
+    results = runtime.reconcile(engine, DESIRED)
+    assert [(r.action, r.params["done"]) for r in results] == [("containers.dataset", "canmount=on")] * 2
+    assert all(engine.datasets[ds]["canmount"] == "on" for ds in DATASETS.values())
+    assert "services.stop" not in engine.actions()
+
+
+def test_reconcile_after_docker_was_started_early_twice(engine):
+    runtime.setup(engine, FakeConfig(), "tank")
+    for _ in range(2):
+        engine.datasets["tank/containers/docker"]["mounted"] = "no"
+        (Path(engine.path("docker")) / "stray").write_text("written before the mount")
+        [result, *_] = runtime.reconcile(engine, DESIRED)
+        assert result.target_state == "applied" and "moved aside" in result.params["done"]
+        engine.running.add("docker")
