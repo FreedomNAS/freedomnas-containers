@@ -1,0 +1,6 @@
+. /mnt/app/.env
+FTLCONF_webserver_api_password=$WEB_PASSWORD
+FTLCONF_dns_listeningMode=all
+FTLCONF_ntp_sync_active=false
+FTLCONF_misc_nice=-999
+export FTLCONF_webserver_api_password FTLCONF_dns_listeningMode FTLCONF_ntp_sync_active FTLCONF_misc_nice TZ

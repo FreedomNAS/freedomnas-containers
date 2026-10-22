@@ -1,0 +1,11 @@
+OPTION start
+OPTION overwrite=force
+
+CMD mkdir -p /usr/local/etc/pkg/repos /usr/local/etc/ssl /usr/local/etc/rc.conf.d
+COPY /usr/local/etc/pkg/repos/FreedomNAS.conf /usr/local/etc/pkg/repos/FreedomNAS.conf
+COPY /usr/local/etc/ssl/freedomnas.pub /usr/local/etc/ssl/freedomnas.pub
+PKG pihole
+SYSRC pihole_ftl_enable=YES
+COPY pihole.rc /usr/local/etc/rc.conf.d/pihole_ftl
+SERVICE pihole_ftl restart
+CMD pihole -g

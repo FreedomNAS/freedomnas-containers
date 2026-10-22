@@ -1,0 +1,20 @@
+options:
+  - virtualnet: "fnasjails:<random> default"
+  - nat:
+services:
+  pihole:
+    name: !ENV '${APP}-pihole'
+    makejail: ./Makejail
+    options:
+      - expose: !ENV '${PORT}:80'
+      - expose: '53:53'
+      - expose: '53:53 proto:udp'
+    volumes:
+      - etc: /usr/local/etc/pihole
+      - app: /mnt/app
+volumes:
+  etc:
+    device: ./etc-pihole
+  app:
+    device: .
+    options: ro

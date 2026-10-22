@@ -35,5 +35,13 @@
   "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address.",
   "address_ports": [
     53
+  ],
+  "prepare": [
+    {
+      "path": "./etc-pihole",
+      "owner": {
+        "freebsd": "829:829"
+      }
+    }
   ]
 }
