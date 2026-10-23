@@ -130,6 +130,18 @@ def test_pihole_ignores_the_local_resolver_but_not_a_dns_on_the_lan(nas, config)
         install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
 
 
+def test_pihole_ignores_a_dns_on_another_address_of_the_nas(nas, config):
+    nas.outputs[("containers", "listening")] = (LISTENING + "10.231.0.1:53\n", "")
+    install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
+    apps.remove(runtime, nas, config, "pihole", destroy_data=True)
+    nas.outputs[("containers", "listening")] = (LISTENING + "192.168.1.10:53\n", "")
+    with pytest.raises(catalogue.CatalogueError, match="port 53"):
+        install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
+    nas.outputs[("containers", "listening")] = (LISTENING + "*:53\n", "")
+    with pytest.raises(catalogue.CatalogueError, match="port 53"):
+        install(nas, config, "pihole", DNS_ADDRESS="192.168.1.10")
+
+
 def test_home_assistant_needs_its_fixed_port(nas, config):
     nas.outputs[("containers", "listening")] = (LISTENING + "0.0.0.0:8123\n", "")
     with pytest.raises(catalogue.CatalogueError, match="8123"):

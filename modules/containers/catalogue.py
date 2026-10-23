@@ -134,22 +134,31 @@ def _loopback(address: str) -> bool:
     return address.startswith(("127.", "[::1]", "::1")) or "%lo" in address
 
 
-def used_ports(rt, engine, public_only: bool = False, config=None) -> Set[int]:
+def _elsewhere(listen: str, address: str) -> bool:
+    host = listen.rsplit(":", 1)[0].strip("[]").split("%")[0]
+    return host not in ("*", "0.0.0.0", "::", address)
+
+
+def used_ports(rt, engine, public_only: bool = False, config=None,
+               address: Optional[str] = None) -> Set[int]:
     """
     Ports something on the NAS listens on (TCP or UDP), the ports
     containers publish, stopped ones included, and the ports of catalogue
     apps that are down. public_only leaves out what listens on loopback
-    only, for a port published on one address.
+    only, for a port published on one address; with that address, also
+    what listens on another address of the NAS only (AppJail's dnsmasq for
+    the jails, a bridge's own address).
     """
     ports: Set[int] = set()
     if config is not None:
         for app in (config.get_module_config("containers").get("apps") or {}).values():
             ports.update(int(p) for p in app.get("ports") or ([app["web_port"]] if app.get("web_port") else []))
+    bind = address
     try:
         for row in records.run(engine, CATEGORY, "listening"):
             address = row.get("address") or ""
             match = _LISTEN.search(address)
-            if match and not (public_only and _loopback(address)):
+            if match and not (public_only and (_loopback(address) or (bind and _elsewhere(address, bind)))):
                 ports.add(int(match.group(1)))
     except Exception:
         pass
@@ -417,8 +426,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     folder = recipe(engine, item, app_file)
     if folder is None:
         raise CatalogueError(f"{item['name']} is not available on this edition yet")
+    address = next((values.get(s["key"]) for s in item.get("settings", []) if s.get("type") == "address"), None)
     env = resolve(item, values, engine, config, used_ports(rt, engine, config=config),
-                  used_ports(rt, engine, public_only=True, config=config))
+                  used_ports(rt, engine, public_only=True, config=config, address=address or _local_address()))
     env["APP"] = name
     text = (folder / app_file).read_text()
     editable = {file_name: key for key, file_name in apps.app_files(engine).items()}
