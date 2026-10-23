@@ -31,8 +31,9 @@ Setting types in app.json:
 `fixed` holds values the user never changes; `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
-own certificate and key, cert.pem and key.pem, and both in one file,
-tls.pem, for an app that serves HTTPS itself); `ports` lists ports used without a
+own certificate and key, cert.pem and key.pem, both in one file,
+tls.pem, and the NAS's hostname the certificate is for, hostname, for an
+app that serves HTTPS itself); `ports` lists ports used without a
 setting (host networking), `address_ports` ports published on one address
 setting only, which a service listening on loopback does not block.
 
@@ -360,6 +361,10 @@ def _folders(item: Dict[str, Any], env: Dict[str, str], recipe_name: str = "") -
     return folders
 
 
+def _hostname() -> str:
+    return socket.gethostname() or "freedomnas"
+
+
 def _tls_folders(item: Dict[str, Any]) -> List[str]:
     return [entry["path"] for entry in item.get("prepare", []) if isinstance(entry, dict) and entry.get("tls")]
 
@@ -460,14 +465,15 @@ def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
                 continue
             try:
                 if ((folder / "cert.pem").read_bytes() == cert and (folder / "key.pem").read_bytes() == key
-                        and (folder / "tls.pem").read_bytes() == key + cert):
+                        and (folder / "tls.pem").read_bytes() == key + cert
+                        and (folder / "hostname").read_text() == _hostname()):
                     continue
             except OSError:
                 pass
             uid, gid = owners.get(path_text, ("0", "0"))
             try:
                 engine.execute(CATEGORY, "tls_copy", uid=uid, gid=gid, path=str(folder),
-                               cert=str(tls.cert_file()), key=str(tls.key_file()))
+                               cert=str(tls.cert_file()), key=str(tls.key_file()), hostname=_hostname())
                 changed = True
             except Exception as exc:
                 results.append(apps._result(f"{name}.tls", apps._stderr(exc), app=name))
@@ -528,7 +534,7 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))
             if path_text in _tls_folders(item):
                 engine.execute(CATEGORY, "tls_copy", uid=uid, gid=gid, path=str(path),
-                               cert=str(tls.cert_file()), key=str(tls.key_file()))
+                               cert=str(tls.cert_file()), key=str(tls.key_file()), hostname=_hostname())
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise

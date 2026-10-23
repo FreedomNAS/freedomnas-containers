@@ -16,7 +16,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - '[ "$$HTTPS" = true ] && export FTLCONF_webserver_port=80s FTLCONF_webserver_tls_cert=/tls/tls.pem FTLCONF_webserver_tls_validity=0; exec start.sh'
+      - '[ "$$HTTPS" = true ] && export FTLCONF_webserver_port=80s FTLCONF_webserver_tls_cert=/tls/tls.pem FTLCONF_webserver_tls_validity=0 FTLCONF_webserver_domain=$$(cat /tls/hostname); exec start.sh'
     cap_add:
       - SYS_NICE
     restart: unless-stopped

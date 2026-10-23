@@ -325,6 +325,7 @@ def test_a_current_copy_is_left_alone(nas, config, issued):
     (folder / "cert.pem").write_text("new cert")
     (folder / "key.pem").write_text("new key")
     (folder / "tls.pem").write_text("new keynew cert")
+    (folder / "hostname").write_text(catalogue._hostname())
     nas.calls.clear()
     assert catalogue.refresh_tls(runtime, apps, nas, config.get_module_config("containers")) == []
     assert not [a for c, a, kw in nas.calls if a in ("tls_copy", "compose_down")]
