@@ -9,9 +9,12 @@
     {"key": "ADMIN_TOKEN", "label": "Admin page token", "type": "password", "show": true,
      "hint": "Opens /admin, where users are invited and settings changed."},
     {"key": "SIGNUPS", "label": "Anyone can sign up", "type": "choice", "choices": ["false", "true"], "default": "true"},
+    {"key": "HTTPS", "label": "HTTPS", "type": "choice", "choices": ["true", "false"], "default": "true",
+     "hint": "Serves the web vault over HTTPS with FreedomNAS's own certificate, the one of its web interface."},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}
   ],
-  "prepare": [{"path": "./data", "owner": {"freebsd": "80:80"}}],
+  "prepare": [{"path": "./data", "owner": {"freebsd": "80:80"}},
+              {"path": "./tls", "owner": {"freebsd": "80:80"}, "tls": true}],
   "portable": ["linux", "freebsd"],
-  "note": "Browsers open the web vault only over HTTPS (or on the NAS itself): put it behind a reverse proxy with a certificate before using it from other devices."
+  "note": "Browsers open the web vault only over HTTPS. With HTTPS on it uses FreedomNAS's own certificate: self-signed, so the browser warns once (compare its fingerprint with the WebUI's), and the Bitwarden phone apps accept it only once the certificate is installed on the phone; for those, a certificate of your own domain (reverse proxy) is the lasting way."
 }

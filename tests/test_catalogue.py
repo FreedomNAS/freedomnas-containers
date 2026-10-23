@@ -271,3 +271,14 @@ def test_the_folders_offered_leave_out_the_apps_and_docker(nas, tmp_path):
     folders = catalogue.pool_folders(nas)
     assert "/tank" in folders and "/tank/media" in folders
     assert not any(f.startswith(("/tank/apps", "/srv/docker")) for f in folders)
+
+
+def test_vaultwarden_gets_freedomnas_certificate_for_https(nas, config, monkeypatch):
+    monkeypatch.setattr(catalogue.tls, "cert_file", lambda: Path("/etc/freedomnas/tls/cert.pem"))
+    monkeypatch.setattr(catalogue.tls, "key_file", lambda: Path("/etc/freedomnas/tls/key.pem"))
+    install(nas, config, "vaultwarden")
+    assert env_of(nas, "vaultwarden")["HTTPS"] == "true"
+    copies = [kw for c, a, kw in nas.calls if a == "tls_copy"]
+    assert len(copies) == 1
+    assert copies[0]["path"].endswith("/vaultwarden/tls")
+    assert (copies[0]["cert"], copies[0]["key"]) == ("/etc/freedomnas/tls/cert.pem", "/etc/freedomnas/tls/key.pem")

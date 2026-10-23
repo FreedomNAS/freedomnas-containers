@@ -116,6 +116,7 @@
     "env_write": "sh -c 'umask 077 && cat > \"$1\"' env_write {file}",
     "folder_prepare": "install -d -o {uid} -g {gid} {path}",
     "folder_own": "chown -R {uid}:{gid} {path}",
+    "tls_copy": "install -o {uid} -g {gid} -m 600 {cert} {key} {path}",
     "listening": "ss -Hltun | awk '{{print $5}}'",
     "listening_output": {
       "format": "lines",

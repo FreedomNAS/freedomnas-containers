@@ -13,7 +13,7 @@ from conftest import PROFILES, REPO
 from freedomnas.engine import FreedomNASEngine
 
 VALUES = {"container": "web", "lines": "200", "image": "nginx:alpine", "project": "site", "file": "/tank/apps/site/x",
-          "dir": "/tank/apps/site", "source": "/a", "target": "/b", "uid": "1000", "gid": "1000", "path": "/p",
+          "dir": "/tank/apps/site", "source": "/a", "target": "/b", "uid": "1000", "gid": "1000", "path": "/p", "cert": "/c.pem", "key": "/k.pem",
           "pool": "tank", "interface": "em0", "version": "15.1-RELEASE", "arch": "amd64"}
 EDITIONS = ["arch", "artix", "debian", "freebsd", "gentoo", "void"]
 

@@ -5,8 +5,14 @@ services:
       - "${PORT}:80"
     volumes:
       - ./data:/data
+      - ./tls:/tls:ro
     environment:
       ADMIN_TOKEN: ${ADMIN_TOKEN}
       SIGNUPS_ALLOWED: ${SIGNUPS}
       TZ: ${TZ}
+      HTTPS: ${HTTPS}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ "$$HTTPS" = true ] && export ROCKET_TLS={certs=\"/tls/cert.pem\",key=\"/tls/key.pem\"}; exec /start.sh'
     restart: unless-stopped

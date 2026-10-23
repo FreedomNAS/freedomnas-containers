@@ -30,7 +30,9 @@ Setting types in app.json:
     secret    always generated, never shown
 `fixed` holds values the user never changes; `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
-owner per recipe); `ports` lists ports used without a
+owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
+own certificate and key, cert.pem and key.pem, for an app that serves
+HTTPS itself); `ports` lists ports used without a
 setting (host networking), `address_ports` ports published on one address
 setting only, which a service listening on loopback does not block.
 
@@ -54,6 +56,11 @@ import socket
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
+try:
+    from freedomnas import tls
+except ImportError:
+    import tls  # type: ignore[no-redef]
 
 
 
@@ -353,6 +360,10 @@ def _folders(item: Dict[str, Any], env: Dict[str, str], recipe_name: str = "") -
     return folders
 
 
+def _tls_folders(item: Dict[str, Any]) -> List[str]:
+    return [entry["path"] for entry in item.get("prepare", []) if isinstance(entry, dict) and entry.get("tls")]
+
+
 def _owner(item: Dict[str, Any], env: Dict[str, str]) -> tuple:
     for setting in item.get("settings", []):
         if setting["type"] == "user":
@@ -454,6 +465,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         for path_text, uid, gid in _folders(item, env, recipe_name(engine)):
             path = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
             engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))
+            if path_text in _tls_folders(item):
+                engine.execute(CATEGORY, "tls_copy", uid=uid, gid=gid, path=str(path),
+                               cert=str(tls.cert_file()), key=str(tls.key_file()))
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise
