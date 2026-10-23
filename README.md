@@ -141,6 +141,7 @@ Each `containers-<os>.json` holds, under `containers`:
 | `app_file`, `compose_check`, `compose_write`, `compose_up`, `compose_down`, `compose_pull`, `compose_update`, `compose_remove`, `compose_logs`, `app_members` | apps: file name, checker (stdin, `{dir}`), project commands (`{project}`, `{file}`), the project's containers |
 | `env_write`, `folder_prepare`, `folder_own` | catalogue `.env`, folders, owners after a move (recursive) |
 | `tls_copy` | copy of FreedomNAS's certificate and key (`{cert}`, `{key}`) into a catalogue folder marked `tls` (Vaultwarden's and Pi-hole's `./tls`), plus `tls.pem` with key and certificate in one file and `hostname`, the NAS's hostname the certificate is for (`{hostname}`); copied again by the reconcile when FreedomNAS issues a new certificate |
+| `proxy_upstream` | how a catalogue app goes behind the [reverse proxy](https://codeberg.org/FreedomNAS/freedomnas-proxy): `publish` (the recipe publishes `${WEB_PUBLISH}`, set to `127.0.0.1:<internal port>`), `address` (the proxy reaches the app's member at its own address on the inner port; the recipe's `proxied/` files, when present, replace its own) |
 | `catalogue_recipe`, `app_files` | the catalogue recipe folder of this edition; files of an app beside its app file (key -> name), edited in the WebUI |
 | `ui` | words and examples for the page: `container`, `app_tool`, `catalogue`, `name_required`, `volumes_label`, `run_hint`, `examples`, `app_example` |
 
@@ -151,6 +152,29 @@ templates over the command's own (`"{Name}"`), `values` translates values,
 Docker and buildah print the module's names directly through Go templates;
 AppJail's tab-separated listing is mapped. `tests/test_profiles.py` formats
 every command of every profile with the real engine.
+
+## Behind the reverse proxy
+
+When the reverse proxy module (`freedomnas-proxy`) is set up, the catalogue
+apps whose `app.json` web block names an `inner` port for this edition's
+recipe go behind it: the proxy takes the app's public web port and serves it
+over HTTPS with FreedomNAS's certificate, the app moves where only the proxy
+reaches it. Apps installed while the proxy is on are created behind it;
+installed apps move at the next reconcile (the proxy's setup runs one), and
+come back on their own port if the proxy is no longer set up. The module
+writes one site per app that is up (`app-<name>.caddy`, with the proxy's
+`site_template`) and has the proxy check and reload its configuration.
+
+```json
+"web": {"port": "PORT", "inner": {"linux": 8096, "freebsd": 8096}, "service": "jellyfin",
+        "behind_env": {"WEB_SCHEME": "https"}}
+```
+
+`service` names the member the proxy reaches on FreeBSD (`<app>-<service>`);
+`behind_env` goes into the app's `.env` while it is behind the proxy
+(Nextcloud: `OVERWRITEPROTOCOL`, `TRUSTED_PROXIES`). Apps that serve HTTPS
+themselves (a `tls` folder) and apps with a fixed port on the host network
+stay where they are. The record keeps `proxy: {port, inner, upstream|member}`.
 
 ## Tests
 

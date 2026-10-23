@@ -43,7 +43,8 @@ def test_every_command_formats(profile_dir, edition):
     commands = [k for k, v in section.items()
                 if not k.startswith("_") and (isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v)))
                 and k not in ("services_order", "socket_units", "configure_services", "app_file", "backend",
-                              "runtime_name", "boot_services", "ports_pattern", "name_pattern", "name_hint")]
+                              "runtime_name", "boot_services", "ports_pattern", "name_pattern", "name_hint",
+                              "proxy_upstream")]
     assert "ps" in commands and "run" in commands
     for action in commands:
         engine.get_command("containers", action, **VALUES)

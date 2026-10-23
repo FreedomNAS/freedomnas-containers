@@ -3,7 +3,7 @@
   "name": "Immich",
   "description": "Back up the photos and videos of your phones and browse them by place, face and date. Needs 4 GB of memory or more.",
   "website": "https://immich.app",
-  "web": {"port": "PORT"},
+  "web": {"port": "PORT", "inner": {"linux": 2283}},
   "settings": [
     {"key": "PORT", "label": "Web port", "type": "port", "default": "2283"},
     {"key": "UPLOAD_LOCATION", "label": "Photo library", "type": "folder", "default": "./library",

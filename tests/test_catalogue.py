@@ -52,9 +52,9 @@ def test_every_entry_is_complete():
     for item in catalogue.entries():
         provided = {s["key"] for s in item["settings"] if s["type"] != "user"} | set(item.get("fixed", {}))
         provided |= {s[k] for s in item["settings"] if s["type"] == "user" for k in ("uid", "gid")}
-        provided |= {"APP"}
+        provided |= {"APP", "WEB_PUBLISH"} | set((item.get("web") or {}).get("behind_env") or {})
         for recipe in [d for d in item["_dir"].iterdir() if d.is_dir()]:
-            for file in recipe.iterdir():
+            for file in [f for f in recipe.rglob("*") if f.is_file()]:
                 used = set(re.findall(r"\$\{([A-Z_]+)", file.read_text()))
                 assert used <= provided, (item["id"], file.name, used - provided)
         assert item["web"]["port"] in provided or item["web"].get("fixed"), item["id"]
@@ -358,3 +358,91 @@ def test_a_copy_without_the_combined_file_is_made_again(nas, config, issued):
     nas.calls.clear()
     catalogue.refresh_tls(runtime, apps, nas, config.get_module_config("containers"))
     assert [a for c, a, kw in nas.calls if a == "tls_copy"]
+
+
+PROXY = {"site_template": "# freedomnas-site {owner} {name} {port} {upstream}\n:{port} {{\n\treverse_proxy {upstream}\n}}\n",
+         "sites_dir": "/etc/caddy/freedomnas-sites", "config_file": "/etc/caddy/Caddyfile"}
+
+
+@pytest.fixture
+def behind(nas, config):
+    nas.profile["proxy"] = dict(PROXY)
+    config.others["proxy"] = {"enabled": True}
+    nas.running.add("docker")
+    return nas
+
+
+def site_writes(engine):
+    return [(kw["file"], engine.stdin) for c, a, kw in engine.calls if (c, a) == ("proxy", "site_write")]
+
+
+def test_an_app_installed_with_the_proxy_on_is_born_behind_it(behind, config):
+    install(behind, config, "jellyfin")
+    env = env_of(behind, "jellyfin")
+    assert env["WEB_PUBLISH"] == "127.0.0.1:20000" and env["PORT"] == "8096"
+    record = config.get_module_config("containers")["apps"]["jellyfin"]["proxy"]
+    assert record == {"port": 8096, "inner": 8096, "upstream": "127.0.0.1:20000"}
+    apps.set_state(runtime, behind, config, "jellyfin", "up")
+    behind.calls.clear()
+    catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    calls = [(c, a) for c, a, kw in behind.calls if c == "proxy"]
+    assert ("proxy", "site_write") in calls and calls[-2:] == [("proxy", "validate"), ("proxy", "reload")]
+    file = next(kw["file"] for c, a, kw in behind.calls if a == "site_write")
+    assert file == "/etc/caddy/freedomnas-sites/app-jellyfin.caddy"
+
+
+def test_nextcloud_behind_the_proxy_knows_it_is_https(behind, config):
+    install(behind, config, "nextcloud")
+    env = env_of(behind, "nextcloud")
+    assert env["WEB_SCHEME"] == "https" and env["WEB_PROXIES"] == "172.16.0.0/12"
+
+
+def test_apps_with_their_own_https_or_host_network_stay_where_they_are(behind, config):
+    install(behind, config, "vaultwarden")
+    install(behind, config, "homeassistant")
+    assert "WEB_PUBLISH" not in env_of(behind, "vaultwarden")
+    assert not any("proxy" in app for app in config.get_module_config("containers")["apps"].values())
+
+
+def test_without_the_proxy_nothing_changes(nas, config):
+    install(nas, config, "jellyfin")
+    assert "WEB_PUBLISH" not in env_of(nas, "jellyfin")
+    assert catalogue.proxy_sync(runtime, apps, containers, nas, config) == []
+
+
+def test_an_installed_app_moves_behind_the_proxy_and_back(nas, config):
+    install(nas, config, "jellyfin")
+    apps.set_state(runtime, nas, config, "jellyfin", "up")
+    nas.profile["proxy"] = dict(PROXY)
+    config.others["proxy"] = {"enabled": True}
+    nas.running.add("docker")
+    nas.calls.clear()
+    results = catalogue.proxy_sync(runtime, apps, containers, nas, config)
+    assert env_of(nas, "jellyfin")["WEB_PUBLISH"] == "127.0.0.1:20000"
+    order = [a for c, a, kw in nas.calls if a in ("compose_down", "compose_up", "site_write", "reload")]
+    assert order == ["compose_down", "compose_up", "site_write", "reload"]
+    assert results[0].action == "containers.apps.jellyfin.proxy"
+
+    config.others["proxy"] = {"enabled": False}
+    nas.outputs[("proxy", "sites_list")] = ("# freedomnas-site app jellyfin 8096 127.0.0.1:20000\n", "")
+    nas.calls.clear()
+    catalogue.proxy_sync(runtime, apps, containers, nas, config)
+    assert "WEB_PUBLISH" not in env_of(nas, "jellyfin")
+    assert "proxy" not in config.get_module_config("containers")["apps"]["jellyfin"]
+    assert ("proxy", "file_remove") in [(c, a) for c, a, kw in nas.calls]
+
+
+def test_two_apps_behind_the_proxy_get_two_internal_ports(behind, config):
+    install(behind, config, "jellyfin")
+    install(behind, config, "immich", PORT="2283")
+    assert env_of(behind, "immich")["WEB_PUBLISH"] == "127.0.0.1:20001"
+
+
+def test_a_removed_app_loses_its_site(behind, config):
+    install(behind, config, "jellyfin")
+    apps.remove(runtime, behind, config, "jellyfin")
+    behind.outputs[("proxy", "sites_list")] = ("# freedomnas-site app jellyfin 8096 127.0.0.1:20000\n", "")
+    behind.calls.clear()
+    catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    assert [kw["file"] for c, a, kw in behind.calls if a == "file_remove"] == [
+        "/etc/caddy/freedomnas-sites/app-jellyfin.caddy"]

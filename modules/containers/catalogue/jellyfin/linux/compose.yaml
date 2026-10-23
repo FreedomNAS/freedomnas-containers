@@ -3,7 +3,7 @@ services:
     image: jellyfin/jellyfin:latest
     user: "${PUID}:${PGID}"
     ports:
-      - "${PORT}:8096"
+      - "${WEB_PUBLISH:-${PORT}}:8096"
     volumes:
       - ./config:/config
       - ./cache:/cache

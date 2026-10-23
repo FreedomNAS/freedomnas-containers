@@ -260,6 +260,7 @@
       "file_examples": {
         "makejail": "OPTION container=boot\nOPTION overwrite=force\nOPTION from=ghcr.io/appjail-makejails/nginx:latest"
       }
-    }
+    },
+    "proxy_upstream": "address"
   }
 }

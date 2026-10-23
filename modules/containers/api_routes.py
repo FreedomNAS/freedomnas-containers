@@ -88,6 +88,13 @@ def _run(kind: str, work) -> None:
         _job["finished"] = _now()
 
 
+def _with_proxy(engine, config, work):
+    def run():
+        work()
+        catalogue.proxy_sync(runtime, apps, containers, engine, config)
+    return run
+
+
 def _start_job(kind: str, work):
     with _lock:
         if _job["state"] == "running":
@@ -230,7 +237,7 @@ async def create_app(body: dict, username: str = Depends(authenticate)):
     if isinstance(result, JSONResponse):
         return result
     if body.get("start"):
-        return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+        return _start_job("app", _with_proxy(engine, config, lambda: apps.set_state(runtime, engine, config, name, "up")))
     return {"created": name}
 
 
@@ -247,7 +254,7 @@ async def replace_app(name: str, body: dict, username: str = Depends(authenticat
         return result
     current = await _call(apps.read, runtime, engine, config, name)
     if not isinstance(current, JSONResponse) and current["state"] == "up":
-        return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+        return _start_job("app", _with_proxy(engine, config, lambda: apps.set_state(runtime, engine, config, name, "up")))
     return {"updated": name}
 
 
@@ -260,8 +267,8 @@ async def app_action(name: str, action: str, username: str = Depends(authenticat
     if isinstance(current, JSONResponse):
         return current
     if action == "update":
-        return _start_job("app", lambda: apps.refresh(runtime, engine, config, name))
-    return _start_job("app", lambda: apps.set_state(runtime, engine, config, name, action))
+        return _start_job("app", _with_proxy(engine, config, lambda: apps.refresh(runtime, engine, config, name)))
+    return _start_job("app", _with_proxy(engine, config, lambda: apps.set_state(runtime, engine, config, name, action)))
 
 
 @router.get("/apps/{name}/logs")
@@ -273,8 +280,12 @@ async def app_logs(name: str, lines: int = 200, username: str = Depends(authenti
 
 @router.delete("/apps/{name}")
 async def remove_app(name: str, destroy_data: bool = False, username: str = Depends(authenticate)):
-    result = await _call(apps.remove, runtime, get_engine(), get_config(), name, destroy_data)
-    return result if isinstance(result, JSONResponse) else {"removed": name, "destroyed": destroy_data}
+    engine, config = get_engine(), get_config()
+    result = await _call(apps.remove, runtime, engine, config, name, destroy_data)
+    if isinstance(result, JSONResponse):
+        return result
+    await asyncio.to_thread(catalogue.proxy_sync, runtime, apps, containers, engine, config)
+    return {"removed": name, "destroyed": destroy_data}
 
 
 @router.get("/catalogue")
@@ -317,7 +328,7 @@ async def install_from_catalogue(entry_id: str, body: dict, username: str = Depe
     result = await _call(catalogue.install, runtime, apps, containers, engine, config, entry_id, name, values)
     if isinstance(result, JSONResponse):
         return result
-    job = _start_job("app", lambda: apps.set_state(runtime, engine, config, name, "up"))
+    job = _start_job("app", _with_proxy(engine, config, lambda: apps.set_state(runtime, engine, config, name, "up")))
     if isinstance(job, JSONResponse):
         return job
     return {**result, **job}

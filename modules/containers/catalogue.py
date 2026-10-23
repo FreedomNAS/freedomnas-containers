@@ -40,6 +40,12 @@ setting only, which a service listening on loopback does not block.
 A reinstall on a kept dataset keeps the passwords and secrets of its old
 .env: the databases on the dataset were made with them.
 
+With the reverse proxy module set up, an entry whose web block names an
+"inner" port for this edition goes behind it (see go_behind and proxy_sync):
+the proxy serves the public web port over HTTPS, the app moves where only
+the proxy reaches it; "behind_env" goes into its .env meanwhile, and a
+recipe's proxied/ folder, when present, replaces files of the recipe.
+
 An app records the recipe it was installed with. When its pool comes back
 on an edition with another recipe, `adopt` writes the new one beside the
 data if app.json lists both under "portable" (the same files work with
@@ -492,6 +498,214 @@ def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
     return results
 
 
+PROXY_CATEGORY = "proxy"
+PROXY_OWNER = "app"
+PROXIED_DIR = "proxied"
+INTERNAL_PORTS = range(20000, 30000)
+
+
+def _recipe_files(folder: Path, behind: bool = False) -> Dict[str, str]:
+    """The recipe's files by name; behind the proxy, those of its proxied/ folder replace them."""
+    files = {path.name: path.read_text() for path in sorted(folder.iterdir()) if path.is_file()}
+    overlay = folder / PROXIED_DIR
+    if behind and overlay.is_dir():
+        files.update({path.name: path.read_text() for path in sorted(overlay.iterdir()) if path.is_file()})
+    return files
+
+
+def _proxy_profile(engine) -> Dict[str, Any]:
+    try:
+        section = engine.get_profile_section(PROXY_CATEGORY)
+    except Exception:
+        return {}
+    return section if section.get("site_template") else {}
+
+
+def proxy_on(engine, config) -> bool:
+    """The reverse proxy module is installed here and set up."""
+    return bool(_proxy_profile(engine)) and bool((config.get_module_config(PROXY_CATEGORY) or {}).get("enabled"))
+
+
+def _upstream_kind(engine) -> str:
+    try:
+        return engine.get_profile_value(CATEGORY, "proxy_upstream") or ""
+    except Exception:
+        return ""
+
+
+def proxyable(engine, item: Dict[str, Any]) -> bool:
+    """
+    The entry's web interface can sit behind the proxy: its web port is a
+    setting, it serves no HTTPS of its own, and its web block names the
+    port inside the app for this edition's recipe ("inner").
+    """
+    web = item.get("web") or {}
+    inner = (web.get("inner") or {}).get(recipe_name(engine))
+    return bool(inner) and not web.get("fixed") and not _tls_folders(item) and bool(_upstream_kind(engine))
+
+
+def proxy_wanted(engine, config, item: Dict[str, Any]) -> bool:
+    return proxyable(engine, item) and proxy_on(engine, config)
+
+
+def _internal_port(rt, engine, config) -> int:
+    taken = used_ports(rt, engine, config=config)
+    for app in (config.get_module_config(CATEGORY).get("apps") or {}).values():
+        upstream = (app.get("proxy") or {}).get("upstream") or ""
+        if upstream.rpartition(":")[2].isdigit():
+            taken.add(int(upstream.rpartition(":")[2]))
+    for port in INTERNAL_PORTS:
+        if port not in taken:
+            return port
+    raise CatalogueError("No free internal port left for the reverse proxy")
+
+
+def go_behind(rt, engine, config, item: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Put the app's web port behind the proxy: the proxy takes the public
+    port (the web setting), the app moves where only the proxy reaches it.
+    "publish": the recipe publishes ${WEB_PUBLISH} (127.0.0.1:<internal>);
+    "address": the proxy reaches the member named web.service at its own
+    address on the inner port (its proxied/ files expose nothing).
+    """
+    web = item.get("web") or {}
+    record = {"port": int(env[web["port"]]), "inner": int(web["inner"][recipe_name(engine)])}
+    env.update(web.get("behind_env") or {})
+    if _upstream_kind(engine) == "publish":
+        internal = _internal_port(rt, engine, config)
+        env["WEB_PUBLISH"] = f"127.0.0.1:{internal}"
+        record["upstream"] = env["WEB_PUBLISH"]
+    else:
+        record["member"] = web.get("service") or ""
+    return record
+
+
+def come_back(item: Dict[str, Any], env: Dict[str, str]) -> None:
+    for key in ["WEB_PUBLISH", *((item.get("web") or {}).get("behind_env") or {})]:
+        env.pop(key, None)
+
+
+def _site_file(engine, name: str) -> str:
+    return f"{_proxy_profile(engine)['sites_dir']}/{PROXY_OWNER}-{name}.caddy"
+
+
+def _upstream(engine, rt, name: str, record: Dict[str, Any], containers_now: List[Dict[str, Any]]) -> Optional[str]:
+    if record.get("upstream"):
+        return record["upstream"]
+    member = f"{name}-{record['member']}" if record.get("member") else None
+    for container in containers_now:
+        if (member is None or container.get("name") == member) and container.get("address") \
+                and container.get("state") == "running":
+            if member is None and not str(container.get("name") or "").startswith(f"{name}-"):
+                continue
+            return f"{container['address'].split(',')[0].strip()}:{record['inner']}"
+    return None
+
+
+def proxy_sync(runtime, apps, rt, engine, config) -> List:
+    """
+    Move catalogue apps behind the proxy (or back when it is gone), then
+    write one proxy site per app that is up and behind it, drop the sites of
+    apps that are not, and reload the proxy when anything changed.
+    """
+    section = config.get_module_config(CATEGORY)
+    if not section.get("enabled") or not apps.supported(engine):
+        return []
+    results = []
+    on = proxy_on(engine, config)
+    records = dict(section.get("apps") or {})
+    for name, app in sorted(records.items()):
+        try:
+            item = entry(app.get("catalogue") or "")
+        except CatalogueError:
+            continue
+        behind = bool(app.get("proxy"))
+        if behind == (on and proxyable(engine, item)):
+            continue
+        try:
+            _move(runtime, apps, rt, engine, config, name, app, item, not behind)
+            results.append(apps._result(f"{name}.proxy", app=name, behind=not behind))
+        except Exception as exc:
+            results.append(apps._result(f"{name}.proxy", apps._stderr(exc), app=name))
+    if not _proxy_profile(engine):
+        return results
+    profile = _proxy_profile(engine)
+    try:
+        current, _ = engine.execute(PROXY_CATEGORY, "sites_list", dir=profile["sites_dir"])
+    except Exception:
+        current = ""
+    present = {line.split()[3] for line in current.splitlines()
+               if line.startswith("# freedomnas-site ") and len(line.split()) >= 6 and line.split()[2] == PROXY_OWNER}
+    try:
+        containers_now = rt.containers(engine)
+    except Exception:
+        containers_now = []
+    wanted = {}
+    if on:
+        for name, app in (config.get_module_config(CATEGORY).get("apps") or {}).items():
+            record = app.get("proxy")
+            if record and app.get("state") == "up":
+                upstream = _upstream(engine, rt, name, record, containers_now)
+                if upstream:
+                    wanted[name] = profile["site_template"].format(
+                        owner=PROXY_OWNER, name=name, port=record["port"], upstream=upstream)
+    changed = False
+    try:
+        for name, text in sorted(wanted.items()):
+            file = _site_file(engine, name)
+            old, _ = engine.execute(PROXY_CATEGORY, "file_read", check=False, file=file)
+            if old.rstrip() != text.rstrip():
+                engine.execute_with_stdin(PROXY_CATEGORY, "site_write", text, file=file)
+                changed = True
+        for name in sorted(present - set(wanted)):
+            engine.execute(PROXY_CATEGORY, "file_remove", file=_site_file(engine, name))
+            changed = True
+        if changed and on:
+            engine.execute(PROXY_CATEGORY, "validate", file=profile["config_file"])
+            engine.execute(PROXY_CATEGORY, "reload", file=profile["config_file"])
+        if changed:
+            results.append(apps._result("proxy.sites", sites=sorted(wanted)))
+    except Exception as exc:
+        results.append(apps._result("proxy.sites", apps._stderr(exc)))
+    return results
+
+
+def _move(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], item: Dict[str, Any],
+          behind: bool) -> None:
+    """An installed app goes behind the proxy or back on its own port, its files and .env rewritten."""
+    file = apps.compose_file(runtime, engine, app["dataset"])
+    base = Path(file).parent
+    env_path = base / ENV_FILE
+    env = parse_env(env_path.read_text()) if env_path.exists() else {}
+    folder = recipe(engine, item, Path(file).name)
+    if folder is None:
+        raise CatalogueError(f"{item['name']} has no recipe on this edition")
+    was_up = app.get("state") == "up"
+    if was_up:
+        apps._compose(engine, "compose_down", name, file)
+    record = go_behind(rt, engine, config, item, env) if behind else None
+    if not behind:
+        come_back(item, env)
+    engine.execute_with_stdin(CATEGORY, "env_write", render_env(env), file=str(env_path))
+    base_files = _recipe_files(folder)
+    for file_name, content in _recipe_files(folder, behind).items():
+        if (folder / PROXIED_DIR / file_name).is_file() or file_name in base_files:
+            engine.execute_with_stdin(CATEGORY, "compose_write", content, file=str(base / file_name))
+    records = dict(config.get_module_config(CATEGORY).get("apps") or {})
+    current = dict(records.get(name) or app)
+    if record:
+        current["proxy"] = record
+    else:
+        current.pop("proxy", None)
+    records[name] = current
+    section = config.get_module_config(CATEGORY)
+    section["apps"] = records
+    config.set_module_config(CATEGORY, section)
+    if was_up:
+        apps._compose(engine, "compose_update" if apps._profile(engine, "compose_update") else "compose_up",
+                      name, file)
+
+
 def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             values: Dict[str, str]) -> Dict[str, Any]:
     """
@@ -508,23 +722,28 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     env = resolve(item, values, engine, config, used_ports(rt, engine, config=config),
                   used_ports(rt, engine, public_only=True, config=config, address=address or _local_address()))
     env["APP"] = name
-    text = (folder / app_file).read_text()
+    behind = proxy_wanted(engine, config, item)
+    record_proxy = None
+    if behind:
+        record_proxy = go_behind(rt, engine, config, item, env)
+    sources = _recipe_files(folder, behind)
+    text = sources.pop(app_file)
     editable = {file_name: key for key, file_name in apps.app_files(engine).items()}
     files, others = {}, {}
-    for path in sorted(folder.iterdir()):
-        if path.is_file() and path.name != app_file:
-            if path.name in editable:
-                files[editable[path.name]] = path.read_text()
-            else:
-                others[path.name] = path.read_text()
+    for file_name, content in sources.items():
+        if file_name in editable:
+            files[editable[file_name]] = content
+        else:
+            others[file_name] = content
     dataset = apps.dataset_for(config.get_module_config("containers").get("pool") or "", name)
     if runtime.dataset_state(engine, dataset)["exists"] and name not in (
             config.get_module_config("containers").get("apps") or {}):
         env.update(_kept_secrets(item, Path(apps.compose_file(runtime, engine, dataset)).with_name(ENV_FILE)))
-    apps.create(runtime, engine, config, name, text,
-                extra={"catalogue": item["id"], "recipe": recipe_name(engine),
-                       "web_port": web_port(item, env), "ports": app_ports(item, env)},
-                env_text=render_env(env), files=files)
+    extra = {"catalogue": item["id"], "recipe": recipe_name(engine),
+             "web_port": web_port(item, env), "ports": app_ports(item, env)}
+    if record_proxy:
+        extra["proxy"] = record_proxy
+    apps.create(runtime, engine, config, name, text, extra=extra, env_text=render_env(env), files=files)
     try:
         base = Path(apps.compose_file(runtime, engine, dataset)).parent
         for file_name, content in others.items():

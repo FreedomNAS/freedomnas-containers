@@ -90,4 +90,5 @@ class ContainersModule(FreedomNASModule):
             return results
         adopt = lambda name, app, file: catalogue.adopt(self._engine, name, app, file)
         results += catalogue.refresh_tls(runtime, apps, self._engine, desired)
-        return results + apps.reconcile(runtime, containers, self._engine, desired, adopt)
+        results += apps.reconcile(runtime, containers, self._engine, desired, adopt)
+        return results + catalogue.proxy_sync(runtime, apps, containers, self._engine, self._config)

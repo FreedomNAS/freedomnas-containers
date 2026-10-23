@@ -3,7 +3,7 @@
   "name": "Nextcloud",
   "description": "Your own cloud: files, calendars, contacts and photos, synced to your phone and computers.",
   "website": "https://nextcloud.com",
-  "web": {"port": "PORT"},
+  "web": {"port": "PORT", "inner": {"linux": 80}, "behind_env": {"WEB_SCHEME": "https", "WEB_PROXIES": "172.16.0.0/12"}},
   "settings": [
     {"key": "PORT", "label": "Web port", "type": "port", "default": "8088"},
     {"key": "ADMIN_USER", "label": "Administrator", "type": "text", "default": "admin"},

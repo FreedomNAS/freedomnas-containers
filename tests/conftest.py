@@ -48,6 +48,12 @@ class FakeEngine:
         self.owners = {}
         self.extra_datasets = []
 
+    def get_profile_section(self, category):
+        try:
+            return self.profile[category]
+        except KeyError:
+            raise CommandTranslationError(category)
+
     def get_profile_value(self, category, key):
         try:
             return self.profile[category][key]
@@ -140,6 +146,7 @@ class FakeEngine:
 class FakeConfig:
     def __init__(self, section=None, users=("sarah",), timezone="Europe/Rome"):
         self.section = section or {}
+        self.others = {}
         self.users = [{"username": u} for u in users]
         self.timezone = timezone
 
@@ -147,6 +154,8 @@ class FakeConfig:
         return {"users": self.users, "system": {"timezone": self.timezone}}
 
     def get_module_config(self, module_id):
+        if module_id in self.others:
+            return json.loads(json.dumps(self.others[module_id]))
         return json.loads(json.dumps(self.section))
 
     def set_module_config(self, module_id, section):

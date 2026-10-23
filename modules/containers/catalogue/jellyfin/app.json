@@ -3,7 +3,7 @@
   "name": "Jellyfin",
   "description": "Stream your films, series and music to every device, from a media folder of your pool.",
   "website": "https://jellyfin.org",
-  "web": {"port": "PORT"},
+  "web": {"port": "PORT", "inner": {"linux": 8096, "freebsd": 8096}, "service": "jellyfin"},
   "settings": [
     {"key": "PORT", "label": "Web port", "type": "port", "default": "8096"},
     {"key": "MEDIA", "label": "Media folder", "type": "folder", "default": "./media",
