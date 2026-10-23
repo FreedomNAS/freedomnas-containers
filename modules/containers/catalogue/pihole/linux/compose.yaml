@@ -7,10 +7,16 @@ services:
       - "${PORT}:80/tcp"
     volumes:
       - ./etc-pihole:/etc/pihole
+      - ./tls:/tls:ro
     environment:
       TZ: ${TZ}
       FTLCONF_webserver_api_password: ${WEB_PASSWORD}
       FTLCONF_dns_listeningMode: all
+      HTTPS: ${HTTPS}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ "$$HTTPS" = true ] && export FTLCONF_webserver_port=80s FTLCONF_webserver_tls_cert=/tls/tls.pem FTLCONF_webserver_tls_validity=0; exec start.sh'
     cap_add:
       - SYS_NICE
     restart: unless-stopped

@@ -31,8 +31,8 @@ Setting types in app.json:
 `fixed` holds values the user never changes; `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
-own certificate and key, cert.pem and key.pem, for an app that serves
-HTTPS itself); `ports` lists ports used without a
+own certificate and key, cert.pem and key.pem, and both in one file,
+tls.pem, for an app that serves HTTPS itself); `ports` lists ports used without a
 setting (host networking), `address_ports` ports published on one address
 setting only, which a service listening on loopback does not block.
 
@@ -459,7 +459,8 @@ def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
             if not folder.is_dir():
                 continue
             try:
-                if (folder / "cert.pem").read_bytes() == cert and (folder / "key.pem").read_bytes() == key:
+                if ((folder / "cert.pem").read_bytes() == cert and (folder / "key.pem").read_bytes() == key
+                        and (folder / "tls.pem").read_bytes() == key + cert):
                     continue
             except OSError:
                 pass

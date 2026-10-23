@@ -140,7 +140,7 @@ Each `containers-<os>.json` holds, under `containers`:
 | `listening` + `listening_output` | records `address` (`host:port`) of what listens on the NAS |
 | `app_file`, `compose_check`, `compose_write`, `compose_up`, `compose_down`, `compose_pull`, `compose_update`, `compose_remove`, `compose_logs`, `app_members` | apps: file name, checker (stdin, `{dir}`), project commands (`{project}`, `{file}`), the project's containers |
 | `env_write`, `folder_prepare`, `folder_own` | catalogue `.env`, folders, owners after a move (recursive) |
-| `tls_copy` | copy of FreedomNAS's certificate and key (`{cert}`, `{key}`) into a catalogue folder marked `tls` (Vaultwarden's `./tls`) |
+| `tls_copy` | copy of FreedomNAS's certificate and key (`{cert}`, `{key}`) into a catalogue folder marked `tls` (Vaultwarden's and Pi-hole's `./tls`), plus `tls.pem` with key and certificate in one file; copied again by the reconcile when FreedomNAS issues a new certificate |
 | `catalogue_recipe`, `app_files` | the catalogue recipe folder of this edition; files of an app beside its app file (key -> name), edited in the WebUI |
 | `ui` | words and examples for the page: `container`, `app_tool`, `catalogue`, `name_required`, `volumes_label`, `run_hint`, `examples`, `app_example` |
 

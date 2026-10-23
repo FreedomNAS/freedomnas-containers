@@ -243,7 +243,7 @@
     "env_write": "sh -c 'umask 077 && cat > \"$1\"' env_write {file}",
     "folder_prepare": "install -d -o {uid} -g {gid} {path}",
     "folder_own": "chown -R {uid}:{gid} {path}",
-    "tls_copy": "install -o {uid} -g {gid} -m 600 {cert} {key} {path}",
+    "tls_copy": "sh -c 'umask 077 && install -o \"$1\" -g \"$2\" -m 600 \"$3\" \"$4\" \"$5\" && cat \"$4\" \"$3\" > \"$5/.tls.pem\" && chown \"$1:$2\" \"$5/.tls.pem\" && mv \"$5/.tls.pem\" \"$5/tls.pem\"' tls_copy {uid} {gid} {cert} {key} {path}",
     "ui": {
       "container": "jail",
       "app_tool": "AppJail Director",

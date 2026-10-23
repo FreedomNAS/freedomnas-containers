@@ -27,12 +27,23 @@
       "show": true
     },
     {
+      "key": "HTTPS",
+      "label": "HTTPS",
+      "type": "choice",
+      "choices": [
+        "true",
+        "false"
+      ],
+      "default": "true",
+      "hint": "Serves the web interface over HTTPS with FreedomNAS's own certificate, the one of its web interface."
+    },
+    {
       "key": "TZ",
       "label": "Time zone",
       "type": "timezone"
     }
   ],
-  "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address.",
+  "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address. With HTTPS on, the web interface uses the certificate FreedomNAS signs: install FreedomNAS's certificate authority once (System → Certificate) and open it by the NAS's hostname or address.",
   "address_ports": [
     53
   ],
@@ -42,6 +53,14 @@
       "owner": {
         "freebsd": "829:829"
       }
+    },
+    {
+      "path": "./tls",
+      "owner": {
+        "linux": "1000:1000",
+        "freebsd": "829:829"
+      },
+      "tls": true
     }
   ]
 }

@@ -324,6 +324,7 @@ def test_a_current_copy_is_left_alone(nas, config, issued):
     folder = vaultwarden_tls(nas)
     (folder / "cert.pem").write_text("new cert")
     (folder / "key.pem").write_text("new key")
+    (folder / "tls.pem").write_text("new keynew cert")
     nas.calls.clear()
     assert catalogue.refresh_tls(runtime, apps, nas, config.get_module_config("containers")) == []
     assert not [a for c, a, kw in nas.calls if a in ("tls_copy", "compose_down")]
@@ -338,3 +339,21 @@ def test_a_stopped_app_gets_the_copy_but_stays_down(nas, config, issued):
     catalogue.refresh_tls(runtime, apps, nas, desired)
     actions = [a for c, a, kw in nas.calls if c == "containers"]
     assert "tls_copy" in actions and "compose_down" not in actions
+
+
+def test_pihole_serves_https_with_freedomnas_certificate(nas, config, issued):
+    install(nas, config, "pihole")
+    assert env_of(nas, "pihole")["HTTPS"] == "true"
+    copy = next(kw for c, a, kw in nas.calls if a == "tls_copy")
+    assert copy["path"].endswith("/pihole/tls")
+    assert (copy["uid"], copy["gid"]) == ("1000", "1000")
+
+
+def test_a_copy_without_the_combined_file_is_made_again(nas, config, issued):
+    install(nas, config, "vaultwarden")
+    folder = vaultwarden_tls(nas)
+    (folder / "cert.pem").write_text("new cert")
+    (folder / "key.pem").write_text("new key")
+    nas.calls.clear()
+    catalogue.refresh_tls(runtime, apps, nas, config.get_module_config("containers"))
+    assert [a for c, a, kw in nas.calls if a == "tls_copy"]

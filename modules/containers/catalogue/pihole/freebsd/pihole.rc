@@ -4,3 +4,9 @@ FTLCONF_dns_listeningMode=all
 FTLCONF_ntp_sync_active=false
 FTLCONF_misc_nice=-999
 export FTLCONF_webserver_api_password FTLCONF_dns_listeningMode FTLCONF_ntp_sync_active FTLCONF_misc_nice TZ
+if [ "$HTTPS" = true ]; then
+	FTLCONF_webserver_port=80s
+	FTLCONF_webserver_tls_cert=/mnt/app/tls/tls.pem
+	FTLCONF_webserver_tls_validity=0
+	export FTLCONF_webserver_port FTLCONF_webserver_tls_cert FTLCONF_webserver_tls_validity
+fi
