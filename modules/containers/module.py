@@ -89,4 +89,5 @@ class ContainersModule(FreedomNASModule):
         if any(r.target_state == "failed" for r in results):
             return results
         adopt = lambda name, app, file: catalogue.adopt(self._engine, name, app, file)
+        results += catalogue.refresh_tls(runtime, apps, self._engine, desired)
         return results + apps.reconcile(runtime, containers, self._engine, desired, adopt)

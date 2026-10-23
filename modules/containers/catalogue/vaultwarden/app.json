@@ -16,5 +16,5 @@
   "prepare": [{"path": "./data", "owner": {"freebsd": "80:80"}},
               {"path": "./tls", "owner": {"freebsd": "80:80"}, "tls": true}],
   "portable": ["linux", "freebsd"],
-  "note": "Browsers open the web vault only over HTTPS. With HTTPS on it uses FreedomNAS's own certificate: self-signed, so the browser warns once (compare its fingerprint with the WebUI's), and the Bitwarden phone apps accept it only once the certificate is installed on the phone; for those, a certificate of your own domain (reverse proxy) is the lasting way."
+  "note": "Browsers open the web vault only over HTTPS. With HTTPS on it uses the certificate FreedomNAS signs for its web interface: install FreedomNAS's certificate authority once (System → Certificate) on each computer and phone, then open the vault by the NAS's hostname or address and the Bitwarden apps and browser extensions trust it. For access from outside your network, a certificate of your own domain (reverse proxy) is the lasting way."
 }

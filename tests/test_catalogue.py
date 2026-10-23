@@ -282,3 +282,59 @@ def test_vaultwarden_gets_freedomnas_certificate_for_https(nas, config, monkeypa
     assert len(copies) == 1
     assert copies[0]["path"].endswith("/vaultwarden/tls")
     assert (copies[0]["cert"], copies[0]["key"]) == ("/etc/freedomnas/tls/cert.pem", "/etc/freedomnas/tls/key.pem")
+
+
+@pytest.fixture
+def issued(tmp_path, monkeypatch):
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "cert.pem").write_text("new cert")
+    (tls_dir / "key.pem").write_text("new key")
+    monkeypatch.setattr(catalogue.tls, "cert_file", lambda: tls_dir / "cert.pem")
+    monkeypatch.setattr(catalogue.tls, "key_file", lambda: tls_dir / "key.pem")
+    return tls_dir
+
+
+def vaultwarden_tls(nas):
+    folder = Path(nas.datasets["tank/apps/vaultwarden"]["mountpoint"]) / "tls"
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+def test_a_reissued_certificate_reaches_the_app_and_restarts_it(nas, config, issued):
+    install(nas, config, "vaultwarden")
+    folder = vaultwarden_tls(nas)
+    (folder / "cert.pem").write_text("old cert")
+    (folder / "key.pem").write_text("old key")
+    nas.running.add("docker")
+    nas.calls.clear()
+    desired = config.get_module_config("containers")
+    desired["apps"]["vaultwarden"]["state"] = "up"
+    results = catalogue.refresh_tls(runtime, apps, nas, desired)
+    actions = [a for c, a, kw in nas.calls if c == "containers"]
+    assert "tls_copy" in actions and "compose_down" in actions
+    copy = next(kw for c, a, kw in nas.calls if a == "tls_copy")
+    assert copy["path"] == str(folder)
+    assert [r.action for r in results] == ["containers.apps.vaultwarden.tls"]
+    assert all(r.target_state == "applied" for r in results)
+
+
+def test_a_current_copy_is_left_alone(nas, config, issued):
+    install(nas, config, "vaultwarden")
+    folder = vaultwarden_tls(nas)
+    (folder / "cert.pem").write_text("new cert")
+    (folder / "key.pem").write_text("new key")
+    nas.calls.clear()
+    assert catalogue.refresh_tls(runtime, apps, nas, config.get_module_config("containers")) == []
+    assert not [a for c, a, kw in nas.calls if a in ("tls_copy", "compose_down")]
+
+
+def test_a_stopped_app_gets_the_copy_but_stays_down(nas, config, issued):
+    install(nas, config, "vaultwarden")
+    vaultwarden_tls(nas)
+    desired = config.get_module_config("containers")
+    desired["apps"]["vaultwarden"]["state"] = "down"
+    nas.calls.clear()
+    catalogue.refresh_tls(runtime, apps, nas, desired)
+    actions = [a for c, a, kw in nas.calls if c == "containers"]
+    assert "tls_copy" in actions and "compose_down" not in actions

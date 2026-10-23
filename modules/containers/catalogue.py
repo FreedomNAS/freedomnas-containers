@@ -425,6 +425,66 @@ def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
     return None
 
 
+def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
+    """
+    Copy FreedomNAS's certificate again into each catalogue app's "tls" folder
+    whose copy differs (the certificate was issued again for a new address or
+    hostname), and take down the apps that are up so the app reconcile starts
+    them with it.
+    """
+    if not desired.get("enabled"):
+        return []
+    try:
+        cert, key = tls.cert_file().read_bytes(), tls.key_file().read_bytes()
+    except OSError:
+        return []
+    results = []
+    running = None
+    for name, app in sorted((desired.get("apps") or {}).items()):
+        try:
+            item = entry(app.get("catalogue") or "")
+        except CatalogueError:
+            continue
+        folders = _tls_folders(item)
+        if not folders:
+            continue
+        file = apps.compose_file(runtime, engine, app["dataset"])
+        base = Path(file).parent
+        env_path = base / ENV_FILE
+        env = parse_env(env_path.read_text()) if env_path.exists() else {}
+        owners = {path: (uid, gid) for path, uid, gid in _folders(item, env, app.get("recipe") or recipe_name(engine))}
+        changed = False
+        for path_text in folders:
+            folder = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
+            if not folder.is_dir():
+                continue
+            try:
+                if (folder / "cert.pem").read_bytes() == cert and (folder / "key.pem").read_bytes() == key:
+                    continue
+            except OSError:
+                pass
+            uid, gid = owners.get(path_text, ("0", "0"))
+            try:
+                engine.execute(CATEGORY, "tls_copy", uid=uid, gid=gid, path=str(folder),
+                               cert=str(tls.cert_file()), key=str(tls.key_file()))
+                changed = True
+            except Exception as exc:
+                results.append(apps._result(f"{name}.tls", apps._stderr(exc), app=name))
+        if not changed:
+            continue
+        results.append(apps._result(f"{name}.tls", app=name))
+        if app.get("state") != "up":
+            continue
+        if running is None:
+            running = runtime.info(engine) is not None
+        if running:
+            try:
+                apps._compose(engine, "compose_down", name, file)
+            except Exception as exc:
+                results.append(apps._result(f"{name}.down", apps._stderr(exc), app=name))
+    return results
+
+
 def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             values: Dict[str, str]) -> Dict[str, Any]:
     """
