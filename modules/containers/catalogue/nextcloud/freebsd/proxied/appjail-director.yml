@@ -1,0 +1,46 @@
+options:
+  - virtualnet: "fnasjails:<random> default"
+  - nat:
+services:
+  db:
+    name: !ENV '${APP}-db'
+    makejail: ./mariadb.makejail
+    priority: 98
+    oci:
+      arguments: ["--transaction-isolation=READ-COMMITTED"]
+      environment:
+        - MARIADB_ROOT_PASSWORD: !ENV '${DB_ROOT_PASSWORD}'
+        - MARIADB_DATABASE: nextcloud
+        - MARIADB_USER: nextcloud
+        - MARIADB_PASSWORD: !ENV '${DB_PASSWORD}'
+        - TZ: !ENV '${TZ}'
+    volumes:
+      - db: /var/db/mysql
+  app:
+    name: !ENV '${APP}-app'
+    makejail: ./Makejail
+    options:
+      - template: ./template.conf
+      - depend: !ENV '${APP}-db'
+    volumes:
+      - html: /usr/local/www/html
+      - data: /usr/local/www/data
+    oci:
+      environment:
+        - MYSQL_HOST: !ENV '${APP}-db.fnasjails.appjail'
+        - MYSQL_DATABASE: nextcloud
+        - MYSQL_USER: nextcloud
+        - MYSQL_PASSWORD: !ENV '${DB_PASSWORD}'
+        - NEXTCLOUD_ADMIN_USER: !ENV '${ADMIN_USER}'
+        - NEXTCLOUD_ADMIN_PASSWORD: !ENV '${ADMIN_PASSWORD}'
+        - NEXTCLOUD_TRUSTED_DOMAINS: !ENV '${TRUSTED_DOMAINS}'
+        - NEXTCLOUD_DATA_DIR: /usr/local/www/data
+        - TRUSTED_PROXIES: 10.231.0.1
+        - TZ: !ENV '${TZ}'
+volumes:
+  db:
+    device: ./db
+  html:
+    device: ./html
+  data:
+    device: !ENV '${DATA}'

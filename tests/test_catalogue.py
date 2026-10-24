@@ -394,7 +394,7 @@ def test_an_app_installed_with_the_proxy_on_is_born_behind_it(behind, config):
 def test_nextcloud_behind_the_proxy_knows_it_is_https(behind, config):
     install(behind, config, "nextcloud")
     env = env_of(behind, "nextcloud")
-    assert env["WEB_SCHEME"] == "https" and env["WEB_PROXIES"] == "172.16.0.0/12"
+    assert env["WEB_PROXIES"] == "172.16.0.0/12" and "WEB_SCHEME" not in env
 
 
 def test_apps_with_their_own_https_or_host_network_stay_where_they_are(behind, config):

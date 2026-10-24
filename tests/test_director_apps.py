@@ -158,3 +158,15 @@ def test_a_stopped_app_whose_jails_started_at_boot_is_taken_down(bsd, config):
     assert result.action == "containers.apps.site.down" and bsd.actions()[-1] == "containers.compose_down"
     bsd.outputs[("containers", "ps")] = (JAILS.replace("site-web\tUP", "site-web\tDOWN"), "")
     assert apps.reconcile(runtime, containers, bsd, desired) == []
+
+
+def test_nextcloud_goes_behind_the_proxy_on_freebsd_too(bsd):
+    import catalogue
+    item = catalogue.entry("nextcloud")
+    assert catalogue.proxyable(bsd, item)
+    folder = catalogue.recipe(bsd, item, "appjail-director.yml")
+    plain = catalogue._recipe_files(folder)["appjail-director.yml"]
+    behind = catalogue._recipe_files(folder, behind=True)["appjail-director.yml"]
+    assert "expose: !ENV '${PORT}:80'" in plain and "OVERWRITEPROTOCOL" not in plain
+    assert "expose" not in behind
+    assert "TRUSTED_PROXIES: 10.231.0.1" in behind and "OVERWRITEPROTOCOL" not in behind
