@@ -502,3 +502,18 @@ def test_an_app_installed_before_the_file_existed_is_left_alone(nas, config, iss
     folder.rmdir()
     config.others["proxy"] = {"enabled": True, "names": True}
     assert catalogue.refresh_local_dns(runtime, apps, nas, config, config.get_module_config("containers")) == []
+
+
+def test_pihole_also_answers_the_own_domain(nas, config, issued, lan):
+    nas.profile["proxy"] = dict(PROXY)
+    config.others["proxy"] = {"enabled": True, "names": True, "acme": {"domain": "nas.example.org"}}
+    install(nas, config, "pihole")
+    text = names_file(nas).read_text()
+    assert "address=/nas.home.arpa/192.168.1.200\n" in text and "address=/nas.example.org/192.168.1.200\n" in text
+
+
+def test_nextcloud_also_trusts_the_own_domain(config, monkeypatch):
+    monkeypatch.setattr(catalogue.socket, "gethostname", lambda: "nas")
+    config.others["proxy"] = {"enabled": True, "names": True, "acme": {"domain": "nas.example.org"}}
+    values = catalogue.defaults(catalogue.entry("nextcloud"), config, "sarah", set())
+    assert values["TRUSTED_DOMAINS"].split()[-2:] == ["*.nas.home.arpa", "*.nas.example.org"]

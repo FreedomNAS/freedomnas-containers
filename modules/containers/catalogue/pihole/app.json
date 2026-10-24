@@ -43,7 +43,7 @@
       "type": "timezone"
     }
   ],
-  "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address. With HTTPS on, the web interface uses the certificate FreedomNAS signs: install FreedomNAS's certificate authority once (System → Certificate) and open it by the NAS's hostname or address. While the reverse proxy serves the sites by name, Pi-hole answers every name under <hostname>.home.arpa with the NAS's address by itself.",
+  "note": "Answers DNS on port 53 of the NAS's address. Give that address as DNS server in your router, or on each device; the NAS needs a static address. With HTTPS on, the web interface uses the certificate FreedomNAS signs: install FreedomNAS's certificate authority once (System → Certificate) and open it by the NAS's hostname or address. While the reverse proxy serves the sites by name, Pi-hole answers every name under <hostname>.home.arpa (and under your own domain, when it has one) with the NAS's address by itself.",
   "address_ports": [
     53
   ],
@@ -68,7 +68,8 @@
   ],
   "local_dns": {
     "file": "./dnsmasq.d/freedomnas-names.conf",
-    "text": "# FreedomNAS: every name under {domain} is this NAS, where the reverse proxy serves its sites by name\naddress=/{domain}/{address}\n",
+    "header": "# FreedomNAS: every name under these domains is this NAS, where the reverse proxy serves its sites by name\n",
+    "line": "address=/{domain}/{address}\n",
     "off": "# FreedomNAS: the reverse proxy serves no sites by name\n"
   }
 }

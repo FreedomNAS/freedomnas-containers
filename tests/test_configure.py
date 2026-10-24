@@ -107,6 +107,11 @@ def test_appjails_services_stay_enabled_at_boot():
         ("enable", "appjail-natnet"), ("enable", "appjail-health"), ("enable", "appjail")]
 
 
-def test_a_profile_without_host_configuration_does_nothing(engine):
+def test_linux_raises_the_inotify_instances_once_and_keeps_them(engine):
+    engine.files.clear()
+    assert runtime.configure(engine, "tank", {"docker": "tank/containers/docker"}) == ["10-freedomnas-containers.conf"]
+    assert "fs.inotify.max_user_instances = 1024" in engine.files["/etc/sysctl.d/10-freedomnas-containers.conf"]
+    assert "containers.configure" in engine.actions()
+    engine.calls.clear()
     assert runtime.configure(engine, "tank", {"docker": "tank/containers/docker"}) == []
-    assert engine.calls == []
+    assert "containers.file_write" not in engine.actions()

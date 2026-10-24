@@ -41,9 +41,9 @@ A reinstall on a kept dataset keeps the passwords and secrets of its old
 .env: the databases on the dataset were made with them.
 
 An entry's "local_dns" names a file of its app folder (the app's own syntax)
-that FreedomNAS keeps holding "text", with {domain} and {address}, while the
-reverse proxy serves the sites by name under <hostname>.home.arpa, and "off"
-otherwise; written at install and again at every reconcile when it changed
+that FreedomNAS keeps holding "header" and one "line" ({domain}, {address})
+per domain the reverse proxy serves the sites by name under (<hostname>.home.arpa,
+and the user's own domain once it has its certificate), and "off" otherwise; written at install and again at every reconcile when it changed
 (the app is taken down then, its reconcile brings it up). Pi-hole's makes
 every name of the local domain the NAS.
 
@@ -220,7 +220,9 @@ def defaults(item: Dict[str, Any], config, username: str, taken: Set[int]) -> Di
             accounts = _accounts(config)
             values[key] = username if username in accounts else (accounts[0] if accounts else username)
         elif kind == "hosts":
-            values[key] = " ".join(h for h in (socket.gethostname(), _local_address(), f"*.{tls.local_domain()}") if h)
+            own = ((config.get_module_config(PROXY_CATEGORY) or {}).get("acme") or {}).get("domain")
+            values[key] = " ".join(h for h in (socket.gethostname(), _local_address(), f"*.{tls.local_domain()}",
+                                               f"*.{own}" if own else "") if h)
         elif kind == "address":
             values[key] = _local_address() or ""
         elif kind == "secret":
@@ -443,21 +445,30 @@ def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
     return None
 
 
+def name_domains(config) -> List[str]:
+    """The domains the reverse proxy serves the sites by name under, local first."""
+    proxy = config.get_module_config(PROXY_CATEGORY) or {}
+    if not (proxy.get("enabled") and proxy.get("names")):
+        return []
+    own = (proxy.get("acme") or {}).get("domain")
+    return [tls.local_domain()] + ([own] if own else [])
+
+
 def local_dns_text(item: Dict[str, Any], config) -> Optional[str]:
     """
-    What the entry's "local_dns" file holds: its "text" (the app's own
-    syntax, with {domain} and {address}) while the reverse proxy serves the
-    sites by name under <hostname>.home.arpa, its "off" text otherwise; None
-    when the entry has no such file.
+    What the entry's "local_dns" file holds: "header" and a "line" (the app's
+    own syntax, with {domain} and {address}) per domain the reverse proxy
+    serves the sites by name under, "off" when there is none; None when the
+    entry has no such file.
     """
     spec = item.get("local_dns")
     if not spec:
         return None
-    proxy = config.get_module_config(PROXY_CATEGORY) or {}
     address = _local_address()
-    if proxy.get("enabled") and proxy.get("names") and address:
-        return spec["text"].format(domain=tls.local_domain(), address=address)
-    return spec.get("off", "")
+    domains = name_domains(config) if address else []
+    if not domains:
+        return spec.get("off", "")
+    return spec.get("header", "") + "".join(spec["line"].format(domain=d, address=address) for d in domains)
 
 
 def _local_dns_path(base: Path, item: Dict[str, Any]) -> Path:

@@ -1,6 +1,6 @@
 {
   "containers": {
-    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself, and how their output reads (*_output, see the module's records.py). data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=on, so the system mounts it at boot before any service), so Docker's own configuration and image store stay as they are; boot_services disable: Docker waits for the module's reconcile. ps, images and info print JSON lines with the module's field names through Go templates; ports_pattern reads the Ports text. run reads its words NUL-separated on stdin (xargs -0), built from run_words. Apps are Compose projects (compose.yaml), app_members lists a project's containers.",
+    "_note": "Docker for the containers module. Package names and services come from freedomnas-profiles' packages/containers.json (per init); this file holds only what the module runs itself, and how their output reads (*_output, see the module's records.py). data_dirs are the directories Docker keeps its data in: each is mounted from <pool>/containers/<name> (canmount=on, so the system mounts it at boot before any service), so Docker's own configuration and image store stay as they are; boot_services disable: Docker waits for the module's reconcile. ps, images and info print JSON lines with the module's field names through Go templates; ports_pattern reads the Ports text. run reads its words NUL-separated on stdin (xargs -0), built from run_words. Apps are Compose projects (compose.yaml), app_members lists a project's containers. config_files + configure (at setup and every boot): fs.inotify.max_user_instances raised to 1024 when lower, in /etc/sysctl.d/10-freedomnas-containers.conf (a later file of the user's wins), because an app running as a real user (Jellyfin) shares that user's inotify instances with the desktop and crashed at the kernel's 128 (found 2026-10-24 on a Gentoo desktop).",
     "runtime_name": "Docker",
     "backend": "docker",
     "boot_services": "disable",
@@ -128,6 +128,19 @@
       },
       "app_example": "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"8080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html\n    restart: unless-stopped"
     },
-    "proxy_upstream": "publish"
+    "proxy_upstream": "publish",
+    "file_read": "cat {file}",
+    "file_write": "sh -c 'umask 022 && cat > \"$1\"' file_write {file}",
+    "config_files": [
+      {
+        "path": "/etc/sysctl.d/10-freedomnas-containers.conf",
+        "lines": [
+          "# FreedomNAS containers: an app that runs as a user of the NAS (Jellyfin) shares that user's inotify",
+          "# instances with everything else it runs; the kernel's 128 is soon used up. A later file can set more.",
+          "fs.inotify.max_user_instances = 1024"
+        ]
+      }
+    ],
+    "configure": "sh -c '[ \"$(sysctl -n fs.inotify.max_user_instances)\" -ge 1024 ] || sysctl -q -w fs.inotify.max_user_instances=1024'"
   }
 }
