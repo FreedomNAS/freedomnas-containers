@@ -93,7 +93,7 @@ _RELATIVE = re.compile(r"\./[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")
 _ABSOLUTE = re.compile(r"/[A-Za-z0-9._/-]+")
 _TEXT = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 _PASSWORD = re.compile(r"[A-Za-z0-9!#%&()*+,./:;<=>?@^_{|}~\[\]-]{8,128}")
-_HOSTS = re.compile(r"[A-Za-z0-9.:-]+(?: [A-Za-z0-9.:-]+)*")
+_HOSTS = re.compile(r"(?:\*\.)?[A-Za-z0-9.:-]+(?: (?:\*\.)?[A-Za-z0-9.:-]+)*")
 _TZ = re.compile(r"[A-Za-z0-9_+/-]{1,64}")
 _IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)")
 _LISTEN = re.compile(r":(\d+)$")
@@ -213,7 +213,7 @@ def defaults(item: Dict[str, Any], config, username: str, taken: Set[int]) -> Di
             accounts = _accounts(config)
             values[key] = username if username in accounts else (accounts[0] if accounts else username)
         elif kind == "hosts":
-            values[key] = " ".join(h for h in (socket.gethostname(), _local_address()) if h)
+            values[key] = " ".join(h for h in (socket.gethostname(), _local_address(), f"*.{tls.local_domain()}") if h)
         elif kind == "address":
             values[key] = _local_address() or ""
         elif kind == "secret":

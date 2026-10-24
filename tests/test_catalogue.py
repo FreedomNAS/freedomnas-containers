@@ -190,6 +190,15 @@ def test_secrets_never_leave_the_server_before_the_install(config):
     assert all(s["type"] != "secret" for s in catalogue.summary(catalogue.entry("nextcloud"))["settings"])
 
 
+def test_nextcloud_answers_to_every_name_of_the_local_domain(config, monkeypatch):
+    monkeypatch.setattr(catalogue.socket, "gethostname", lambda: "nas")
+    values = catalogue.defaults(catalogue.entry("nextcloud"), config, "sarah", set())
+    assert values["TRUSTED_DOMAINS"].split()[0] == "nas"
+    assert values["TRUSTED_DOMAINS"].split()[-1] == "*.nas.home.arpa"
+    assert catalogue._HOSTS.fullmatch(values["TRUSTED_DOMAINS"])
+    assert not catalogue._HOSTS.fullmatch("nas *")
+
+
 def test_a_catalogue_compose_file_is_checked_with_its_env(nas, config):
     seen = []
     original = nas.execute_with_stdin
