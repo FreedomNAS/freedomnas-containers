@@ -455,3 +455,50 @@ def test_a_removed_app_loses_its_site(behind, config):
     catalogue.proxy_sync(runtime, apps, containers, behind, config)
     assert [kw["file"] for c, a, kw in behind.calls if a == "file_remove"] == [
         "/etc/caddy/freedomnas-sites/app-jellyfin.caddy"]
+
+
+@pytest.fixture
+def lan(monkeypatch):
+    monkeypatch.setattr(catalogue, "_local_address", lambda: "192.168.1.200")
+    monkeypatch.setattr(catalogue.socket, "gethostname", lambda: "nas")
+
+
+def names_file(nas, name="pihole"):
+    return Path(nas.datasets[f"tank/apps/{name}"]["mountpoint"]) / "dnsmasq.d" / "freedomnas-names.conf"
+
+
+def test_pihole_makes_the_local_domain_the_nas_while_names_are_on(nas, config, issued, lan):
+    nas.profile["proxy"] = dict(PROXY)
+    config.others["proxy"] = {"enabled": True, "names": True}
+    install(nas, config, "pihole")
+    assert "address=/nas.home.arpa/192.168.1.200" in names_file(nas).read_text()
+
+
+def test_without_names_pihole_gets_a_file_that_says_so(nas, config, issued, lan):
+    install(nas, config, "pihole")
+    assert "address=" not in names_file(nas).read_text()
+    assert "no sites by name" in names_file(nas).read_text()
+
+
+def test_turning_names_on_rewrites_the_file_and_restarts_pihole(nas, config, issued, lan):
+    nas.running.add("docker")
+    install(nas, config, "pihole")
+    apps.set_state(runtime, nas, config, "pihole", "up")
+    config.others["proxy"] = {"enabled": True, "names": True}
+    nas.calls.clear()
+    results = catalogue.refresh_local_dns(runtime, apps, nas, config, config.get_module_config("containers"))
+    assert [r.action for r in results] == ["containers.apps.pihole.local_dns"]
+    assert "address=/nas.home.arpa/192.168.1.200" in names_file(nas).read_text()
+    assert ("containers", "compose_down") in [(c, a) for c, a, kw in nas.calls]
+    nas.calls.clear()
+    assert catalogue.refresh_local_dns(runtime, apps, nas, config, config.get_module_config("containers")) == []
+    assert not [a for c, a, kw in nas.calls if a in ("compose_write", "compose_down")]
+
+
+def test_an_app_installed_before_the_file_existed_is_left_alone(nas, config, issued, lan):
+    install(nas, config, "pihole")
+    folder = names_file(nas).parent
+    names_file(nas).unlink()
+    folder.rmdir()
+    config.others["proxy"] = {"enabled": True, "names": True}
+    assert catalogue.refresh_local_dns(runtime, apps, nas, config, config.get_module_config("containers")) == []

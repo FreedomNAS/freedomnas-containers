@@ -8,10 +8,12 @@ services:
     volumes:
       - ./etc-pihole:/etc/pihole
       - ./tls:/tls:ro
+      - ./dnsmasq.d:/etc/dnsmasq.d:ro
     environment:
       TZ: ${TZ}
       FTLCONF_webserver_api_password: ${WEB_PASSWORD}
       FTLCONF_dns_listeningMode: all
+      FTLCONF_misc_etc_dnsmasq_d: 'true'
       HTTPS: ${HTTPS}
     entrypoint:
       - /bin/sh

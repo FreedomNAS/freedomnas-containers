@@ -40,6 +40,13 @@ setting only, which a service listening on loopback does not block.
 A reinstall on a kept dataset keeps the passwords and secrets of its old
 .env: the databases on the dataset were made with them.
 
+An entry's "local_dns" names a file of its app folder (the app's own syntax)
+that FreedomNAS keeps holding "text", with {domain} and {address}, while the
+reverse proxy serves the sites by name under <hostname>.home.arpa, and "off"
+otherwise; written at install and again at every reconcile when it changed
+(the app is taken down then, its reconcile brings it up). Pi-hole's makes
+every name of the local domain the NAS.
+
 With the reverse proxy module set up, an entry whose web block names an
 "inner" port for this edition goes behind it (see go_behind and proxy_sync):
 the proxy serves the public web port over HTTPS, the app moves where only
@@ -436,6 +443,65 @@ def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
     return None
 
 
+def local_dns_text(item: Dict[str, Any], config) -> Optional[str]:
+    """
+    What the entry's "local_dns" file holds: its "text" (the app's own
+    syntax, with {domain} and {address}) while the reverse proxy serves the
+    sites by name under <hostname>.home.arpa, its "off" text otherwise; None
+    when the entry has no such file.
+    """
+    spec = item.get("local_dns")
+    if not spec:
+        return None
+    proxy = config.get_module_config(PROXY_CATEGORY) or {}
+    address = _local_address()
+    if proxy.get("enabled") and proxy.get("names") and address:
+        return spec["text"].format(domain=tls.local_domain(), address=address)
+    return spec.get("off", "")
+
+
+def _local_dns_path(base: Path, item: Dict[str, Any]) -> Path:
+    path_text = item["local_dns"]["file"]
+    return base / path_text[2:] if path_text.startswith("./") else Path(path_text)
+
+
+def refresh_local_dns(runtime, apps, engine, config, desired: Dict[str, Any]) -> List:
+    """
+    Write each catalogue app's "local_dns" file again when the names it
+    should hold changed (names turned on or off, a new address or hostname),
+    and take down the apps that are up so the app reconcile starts them with
+    it. An app installed before its entry had the file is left alone.
+    """
+    if not desired.get("enabled"):
+        return []
+    results = []
+    for name, app in sorted((desired.get("apps") or {}).items()):
+        try:
+            item = entry(app.get("catalogue") or "")
+        except CatalogueError:
+            continue
+        text = local_dns_text(item, config)
+        if text is None:
+            continue
+        file = apps.compose_file(runtime, engine, app["dataset"])
+        path = _local_dns_path(Path(file).parent, item)
+        if not path.parent.is_dir():
+            continue
+        try:
+            if path.read_text() == text:
+                continue
+        except OSError:
+            pass
+        try:
+            engine.execute_with_stdin(CATEGORY, "compose_write", text, file=str(path))
+            results.append(apps._result(f"{name}.local_dns", app=name))
+            if app.get("state") == "up" and runtime.info(engine) is not None:
+                apps._compose(engine, "compose_down", name, file)
+        except Exception as exc:
+            results.append(apps._result(f"{name}.local_dns", apps._stderr(exc), app=name))
+    return results
+
+
 def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
     """
     Copy FreedomNAS's certificate again into each catalogue app's "tls" folder
@@ -754,6 +820,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             if path_text in _tls_folders(item):
                 engine.execute(CATEGORY, "tls_copy", uid=uid, gid=gid, path=str(path),
                                cert=str(tls.cert_file()), key=str(tls.key_file()), hostname=_hostname())
+        names = local_dns_text(item, config)
+        if names is not None:
+            engine.execute_with_stdin(CATEGORY, "compose_write", names, file=str(_local_dns_path(base, item)))
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise

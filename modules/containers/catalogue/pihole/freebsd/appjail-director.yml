@@ -11,10 +11,14 @@ services:
       - expose: '53:53 proto:udp'
     volumes:
       - etc: /usr/local/etc/pihole
+      - dnsmasq: /usr/local/etc/dnsmasq.d
       - app: /mnt/app
 volumes:
   etc:
     device: ./etc-pihole
+  dnsmasq:
+    device: ./dnsmasq.d
+    options: ro
   app:
     device: .
     options: ro
