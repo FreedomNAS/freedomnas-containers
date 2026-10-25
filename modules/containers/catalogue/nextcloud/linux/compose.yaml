@@ -12,7 +12,7 @@ services:
       TZ: ${TZ}
     restart: unless-stopped
   app:
-    image: nextcloud:stable-apache
+    image: nextcloud:apache
     depends_on:
       - db
     ports:
