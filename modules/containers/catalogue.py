@@ -491,6 +491,30 @@ def _kept_secrets(item: Dict[str, Any], env_path: Path) -> Dict[str, str]:
             if s["type"] in ("password", "secret") and s["key"] in old}
 
 
+def kept_folders(runtime, apps, engine, config, item: Dict[str, Any], name: str) -> Dict[str, str]:
+    """
+    The folders the app kept on its dataset used before, from its old .env,
+    when it is installed again on that data. Its database still points
+    there: a reinstall that takes another folder finds its library empty.
+    """
+    section = config.get_module_config("containers") or {}
+    dataset = apps.dataset_for(section.get("pool") or "", name)
+    if name in (section.get("apps") or {}) or not runtime.dataset_state(engine, dataset)["exists"]:
+        return {}
+    env_path = Path(apps.compose_file(runtime, engine, dataset)).with_name(ENV_FILE)
+    if not env_path.exists():
+        return {}
+    old = parse_env(env_path.read_text())
+    return {s["key"]: old[s["key"]] for s in item.get("settings", [])
+            if s["type"] in ("folder", "share") and old.get(s["key"])}
+
+
+def folder_warnings(item: Dict[str, Any], kept: Dict[str, str], env: Dict[str, str]) -> List[str]:
+    return [f"{s.get('label', s['key'])}: {item['name']}'s kept data used {kept[s['key']]}, it now uses "
+            f"{env[s['key']]}; what it recorded about the files there (a library) will not find them"
+            for s in item.get("settings", []) if s["key"] in kept and env.get(s["key"]) != kept[s["key"]]]
+
+
 def _owner_for(owner: Any, recipe_name: str) -> Optional[tuple]:
     if isinstance(owner, dict):
         owner = owner.get(recipe_name)
@@ -969,6 +993,7 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             files[editable[file_name]] = content
         else:
             others[file_name] = content
+    kept = kept_folders(runtime, apps, engine, config, item, name)
     dataset = apps.dataset_for(config.get_module_config("containers").get("pool") or "", name)
     if runtime.dataset_state(engine, dataset)["exists"] and name not in (
             config.get_module_config("containers").get("apps") or {}):
@@ -999,4 +1024,8 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         apps.remove(runtime, engine, config, name)
         raise
     shown = {s.get("label", s["key"]): env[s["key"]] for s in item.get("settings", []) if s.get("show")}
-    return {"name": name, "web_port": web_port(item, env), "shown": shown}
+    result = {"name": name, "web_port": web_port(item, env), "shown": shown}
+    warnings = folder_warnings(item, kept, env)
+    if warnings:
+        result["warnings"] = warnings
+    return result

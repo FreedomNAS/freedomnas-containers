@@ -632,3 +632,23 @@ def test_nextcloud_refuses_a_share_that_is_not_a_group_share(nas, config):
     with pytest.raises(catalogue.CatalogueError, match="privata"):
         install(nas, config, "nextcloud", SHARES="privata")
     assert "tank/apps/nextcloud" not in nas.datasets
+
+
+def test_a_reinstall_on_kept_data_offers_and_warns_about_its_old_folders(nas, config, media_share, tmp_path):
+    films = tmp_path / "films"
+    films.mkdir()
+    nas.extra_datasets.append(f"tank/films\t1\t1\t1\t{films}\tfilesystem\tyes\t-")
+    install(nas, config, "jellyfin", MEDIA=str(films))
+    apps.remove(runtime, nas, config, "jellyfin")
+    kept = catalogue.kept_folders(runtime, apps, nas, config, catalogue.entry("jellyfin"), "jellyfin")
+    assert kept == {"MEDIA": str(films)}
+    result = install(nas, config, "jellyfin")
+    [warning] = result["warnings"]
+    assert str(films) in warning and media_share["path"] in warning
+    apps.remove(runtime, nas, config, "jellyfin")
+    assert "warnings" not in install(nas, config, "jellyfin", MEDIA=media_share["path"])
+
+
+def test_a_first_install_has_no_kept_folders(nas, config):
+    assert catalogue.kept_folders(runtime, apps, nas, config, catalogue.entry("jellyfin"), "jellyfin") == {}
+    assert "warnings" not in install(nas, config, "jellyfin")

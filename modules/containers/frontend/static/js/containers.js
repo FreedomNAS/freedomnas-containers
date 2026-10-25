@@ -32,6 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('install-settings').addEventListener('change', onFolderSelect);
   document.getElementById('install-settings').addEventListener('change', onWritersChange);
   document.getElementById('install-settings').addEventListener('change', onSharesChange);
+  document.getElementById('install-settings').addEventListener('change', showKeptNotes);
+  document.getElementById('install-settings').addEventListener('input', showKeptNotes);
   loadStatus();
 });
 
@@ -323,6 +325,13 @@ function settingField(s, value, users, folders, shares = {}, groupShares = []) {
   return `<div class="form-group advanced-only"><label for="${id}">${esc(s.label || s.key)}</label>${input}${hint}</div>`;
 }
 
+function showKeptNotes() {
+  document.querySelectorAll('#install-settings [data-kept-for]').forEach(note => {
+    const field = document.querySelector(`#install-settings [data-key="${CSS.escape(note.dataset.keptFor)}"]`);
+    note.hidden = !field || field.value.trim().replace(/\/+$/, '') === note.dataset.before;
+  });
+}
+
 function onFolderSelect(e) {
   const select = e.target.closest('[data-folder-select]');
   if (!select) return;
@@ -354,6 +363,19 @@ async function onCatalogueClick(e) {
   document.getElementById('f-install-name').value = c.app_name;
   document.getElementById('install-settings').innerHTML =
     c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [], c.shares || {}, c.group_shares || [])).join('');
+  for (const [key, before] of Object.entries(c.kept || {})) {
+    const field = document.querySelector(`#install-settings [data-key="${CSS.escape(key)}"]`);
+    if (!field) continue;
+    const note = document.createElement('p');
+    note.className = 'alert alert-warn text-sm';
+    note.dataset.keptFor = key;
+    note.dataset.before = before;
+    note.style.margin = '8px 0 0';
+    note.textContent = `${c.name} is installed again on its kept data, which used ${before}: its library points there. `
+      + 'With another folder it will not find those files.';
+    field.closest('.form-group').append(note);
+  }
+  showKeptNotes();
   document.getElementById('install-assisted').hidden = UILevel.current() !== 'assisted';
   const hasFolders = c.settings.some(s => ['folder', 'share', 'shares'].includes(s.type));
   document.getElementById('install-assisted-folders').hidden = UILevel.current() !== 'assisted' || !hasFolders;
@@ -382,6 +404,7 @@ async function installFromCatalogue(e) {
   }
   setLoading(btn, false);
   closeModal('modal-install');
+  (result.warnings || []).forEach(w => toast(w, 'warn', 12000));
   document.getElementById('installed-title').textContent = `${c.name} installed as ${result.name}`;
   const rows = [];
   if (result.web_port) {

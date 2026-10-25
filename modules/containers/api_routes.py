@@ -304,8 +304,10 @@ def _catalogue_entry(entry_id: str, username: str) -> dict:
     n = 2
     while name in installed:
         name, n = f"{item['id']}{n}", n + 1
+    kept = catalogue.kept_folders(runtime, apps, engine, config, item, name)
     return {**catalogue.summary(item, catalogue.recipe(engine, item) is not None), "app_name": name,
-            "defaults": catalogue.defaults(item, config, username, taken, engine),
+            "defaults": {**catalogue.defaults(item, config, username, taken, engine), **kept},
+            "kept": kept,
             "shares": catalogue.share_info(engine, config, item),
             "group_shares": catalogue.group_share_names(config),
             "users": catalogue._accounts(config),
