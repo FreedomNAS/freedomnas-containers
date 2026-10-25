@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('form-install').addEventListener('submit', installFromCatalogue);
   document.getElementById('install-settings').addEventListener('change', onFolderSelect);
   document.getElementById('install-settings').addEventListener('change', onWritersChange);
+  document.getElementById('install-settings').addEventListener('change', onSharesChange);
   loadStatus();
 });
 
@@ -273,10 +274,29 @@ function onWritersChange(e) {
     : '*';
 }
 
-function settingField(s, value, users, folders, shares = {}) {
+function sharesField(s, value, groupShares, hint) {
+  const id = `f-set-${esc(s.key)}`;
+  const chosen = value.split(',').filter(Boolean);
+  const boxes = groupShares.length ? groupShares.map(n => `
+    <label class="checkbox-group"><input type="checkbox" value="${esc(n)}" id="${id}-${esc(n)}"${chosen.includes(n) ? ' checked' : ''}>
+      <label for="${id}-${esc(n)}">${esc(n)}</label></label>`).join('')
+    : '<span class="text-muted text-sm">There is no group share yet (Shares page).</span>';
+  return `<div class="form-group" data-shares><label>${esc(s.label || s.key)}</label>${boxes}
+    <input type="hidden" data-key="${esc(s.key)}" data-folder value="${esc(value)}">${hint}</div>`;
+}
+
+function onSharesChange(e) {
+  const box = e.target.closest('[data-shares]');
+  if (!box) return;
+  box.querySelector('input[type="hidden"]').value =
+    [...box.querySelectorAll('input[type="checkbox"]:checked')].map(b => b.value).join(',');
+}
+
+function settingField(s, value, users, folders, shares = {}, groupShares = []) {
   const id = `f-set-${esc(s.key)}`;
   const hint = s.hint ? `<span class="form-hint">${esc(s.hint)}</span>` : '';
   if (s.type === 'share') return shareField(s, value, users, folders, shares[s.key] || {}, hint);
+  if (s.type === 'shares') return sharesField(s, value, groupShares, hint);
   let input;
   if (s.type === 'folder') {
     const inside = String(s.default || '').startsWith('./') ? s.default : null;
@@ -333,9 +353,9 @@ async function onCatalogueClick(e) {
   document.getElementById('install-note').hidden = !c.note;
   document.getElementById('f-install-name').value = c.app_name;
   document.getElementById('install-settings').innerHTML =
-    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [], c.shares || {})).join('');
+    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [], c.shares || {}, c.group_shares || [])).join('');
   document.getElementById('install-assisted').hidden = UILevel.current() !== 'assisted';
-  const hasFolders = c.settings.some(s => s.type === 'folder' || s.type === 'share');
+  const hasFolders = c.settings.some(s => ['folder', 'share', 'shares'].includes(s.type));
   document.getElementById('install-assisted-folders').hidden = UILevel.current() !== 'assisted' || !hasFolders;
   document.getElementById('install-assisted').textContent = `${hasFolders ? 'Everything else uses its'
     : 'It is installed with its'} usual settings; passwords are made up for you and shown once at the end.`;

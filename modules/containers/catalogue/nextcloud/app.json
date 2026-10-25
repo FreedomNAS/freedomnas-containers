@@ -12,8 +12,15 @@
      "hint": "The names and addresses Nextcloud answers to, separated by spaces."},
     {"key": "DATA", "label": "Data folder", "type": "folder", "default": "./data", "owner": {"linux": "33:33", "freebsd": "80:80"}, "empty": true,
      "hint": "Where Nextcloud keeps everyone's files: inside the app, or an empty or new folder of your pool, e.g. /tank/nextcloud. Files already in a folder do not show up in Nextcloud."},
+    {"key": "SHARES", "label": "Shares", "type": "shares", "access": "write", "account": {"linux": "33", "freebsd": "80"},
+     "hint": "The group shares of the NAS Nextcloud shows as External storage, to read and write."},
     {"key": "DB_PASSWORD", "type": "secret"},
     {"key": "DB_ROOT_PASSWORD", "type": "secret"},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}
-  ]
+  ],
+  "share_mounts": {
+    "linux": {"#@shares": "      - {path}:/shares/{name}"},
+    "freebsd": {"#@shares": "      - share-{name}: /shares/{name}", "#@share-volumes": "  share-{name}:\n    device: {path}"}
+  },
+  "scripts": {"freedomnas-shares.sh": "./hooks"}
 }

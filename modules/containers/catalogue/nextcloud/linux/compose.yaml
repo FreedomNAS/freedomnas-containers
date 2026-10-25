@@ -20,6 +20,8 @@ services:
     volumes:
       - ./html:/var/www/html
       - ${DATA:-./data}:/var/www/html/data
+      - ./hooks:/docker-entrypoint-hooks.d/before-starting:ro
+      #@shares
     environment:
       MYSQL_HOST: db
       MYSQL_DATABASE: nextcloud

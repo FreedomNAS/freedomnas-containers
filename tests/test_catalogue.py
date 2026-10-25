@@ -590,3 +590,32 @@ def test_changed_sites_let_the_proxy_follow_them(behind, config, monkeypatch):
     assert seen == [1]
     catalogue.proxy_sync(runtime, apps, containers, behind, config)
     assert seen == [1]
+
+
+def test_nextcloud_mounts_every_group_share_and_writes_them(nas, config, media_share):
+    config.smb = [{"name": "media", "path": "/tank/media", "group": "media"},
+                  {"name": "Famiglia", "path": "/tank/famiglia", "group": "famiglia"},
+                  {"name": "privata", "path": "/tank/privata", "owner": "sarah"}]
+    install(nas, config, "nextcloud")
+    compose = (Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "compose.yaml").read_text()
+    assert "      - /tank/media:/shares/media\n      - /tank/famiglia:/shares/Famiglia\n" in compose
+    assert "#@shares" not in compose and "privata" not in compose
+    assert media_share["apps"] == [("/tank/media", "nextcloud", "33", True),
+                                   ("/tank/famiglia", "nextcloud", "33", True)]
+    [script] = [kw for c, a, kw in nas.calls if a == "script_write"]
+    assert script["file"].endswith("/hooks/freedomnas-shares.sh")
+    assert not (Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "freedomnas-shares.sh").exists()
+
+
+def test_nextcloud_can_be_given_no_share(nas, config, media_share):
+    config.smb = [{"name": "media", "path": "/tank/media", "group": "media"}]
+    install(nas, config, "nextcloud", SHARES="")
+    compose = (Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "compose.yaml").read_text()
+    assert "/shares/" not in compose.replace("before-starting", "") and media_share["apps"] == []
+
+
+def test_nextcloud_refuses_a_share_that_is_not_a_group_share(nas, config):
+    config.smb = [{"name": "privata", "path": "/tank/privata", "owner": "sarah"}]
+    with pytest.raises(catalogue.CatalogueError, match="privata"):
+        install(nas, config, "nextcloud", SHARES="privata")
+    assert "tank/apps/nextcloud" not in nas.datasets

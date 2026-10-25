@@ -25,6 +25,8 @@ services:
     volumes:
       - html: /usr/local/www/html
       - data: /usr/local/www/data
+      - hooks: /entrypoint-hooks.d/before-starting
+      #@shares
     oci:
       environment:
         - MYSQL_HOST: !ENV '${APP}-db.fnasjails.appjail'
@@ -35,6 +37,7 @@ services:
         - NEXTCLOUD_ADMIN_PASSWORD: !ENV '${ADMIN_PASSWORD}'
         - NEXTCLOUD_TRUSTED_DOMAINS: !ENV '${TRUSTED_DOMAINS}'
         - NEXTCLOUD_DATA_DIR: /usr/local/www/data
+        - RUN_HOOKS_AS_ROOT: ""
         - TRUSTED_PROXIES: 10.231.0.1
         - TZ: !ENV '${TZ}'
 volumes:
@@ -44,3 +47,7 @@ volumes:
     device: ./html
   data:
     device: !ENV '${DATA}'
+  hooks:
+    device: ./hooks
+    options: ro
+  #@share-volumes

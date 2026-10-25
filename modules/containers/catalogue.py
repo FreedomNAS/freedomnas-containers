@@ -20,6 +20,11 @@ Setting types in app.json:
               every account, or names separated by commas) and kept when
               the app goes; the app gets its own entry in the share's ACL.
               Another directory of a pool is taken as a plain folder
+    shares    group shares of the NAS mounted into the app, by name separated
+              by commas (default: all of them; empty: none); the recipe's
+              "share_mounts" lines (per recipe, {name} and {path}) replace
+              its marker lines, and the app's account ("account", per
+              recipe) gets its entry in each share's ACL ("access")
     folder    ./name inside the app's dataset, or a directory of a pool;
               offered at every UI level. "owner": "uid:gid" (or
               {recipe: "uid:gid"}) gives the folder to that id instead of
@@ -36,6 +41,8 @@ Setting types in app.json:
     password  generated unless given; shown once after the install when
               "show" is set
     secret    always generated, never shown
+`scripts` names files of the recipe written, executable, into a folder of
+the app ({"file": "./folder"}) instead of beside the recipe.
 `fixed` holds values the user never changes; `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
@@ -114,6 +121,7 @@ _HOSTS = re.compile(r"(?:\*\.)?[A-Za-z0-9.:-]+(?: (?:\*\.)?[A-Za-z0-9.:-]+)*")
 _TZ = re.compile(r"[A-Za-z0-9_+/-]{1,64}")
 _IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)")
 _LISTEN = re.compile(r":(\d+)$")
+_SHARE_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class CatalogueError(Exception):
@@ -258,13 +266,48 @@ def _writers(config, setting: Dict[str, Any], value: str) -> List[str]:
     return names
 
 
+def group_share_names(config) -> List[str]:
+    return [s["name"] for s in config.get_smb_shares() if s.get("group") and _SHARE_NAME.fullmatch(s["name"])]
+
+
+def _chosen_shares(config, setting: Dict[str, Any], value: str) -> List[Dict[str, Any]]:
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    known = {s["name"]: s for s in config.get_smb_shares() if s.get("group")}
+    unknown = [n for n in names if n not in known or not _SHARE_NAME.fullmatch(n)]
+    if unknown:
+        raise CatalogueError(f"{setting.get('label', setting['key'])}: no group share named {', '.join(unknown)}")
+    return [known[n] for n in names]
+
+
+def _render_share_mounts(item: Dict[str, Any], recipe: str, text: str, shares: List[Dict[str, Any]]) -> str:
+    templates = (item.get("share_mounts") or {}).get(recipe) or {}
+    lines = []
+    for line in text.splitlines(keepends=True):
+        marker = line.strip()
+        if marker in templates:
+            lines += [templates[marker].format(name=s["name"], path=s["path"]) + "\n" for s in shares]
+        else:
+            lines.append(line)
+    return "".join(lines)
+
+
+def _app_account(setting: Dict[str, Any], env: Dict[str, str], recipe: str) -> str:
+    account = setting["account"]
+    return str(account[recipe]) if isinstance(account, dict) else env[account]
+
+
 def _attach_shares(engine, config, item: Dict[str, Any], values: Dict[str, str], env: Dict[str, str],
                    name: str) -> None:
     """Make the shares the app serves when they are missing, and let the app in."""
+    recipe = recipe_name(engine)
     for setting in item.get("settings", []):
+        if setting["type"] == "shares":
+            for share in _chosen_shares(config, setting, str(values.get(setting["key"], ""))):
+                groupshares.add_app(engine, config, share["path"], name, _app_account(setting, env, recipe),
+                                    setting.get("access") == "write")
         if setting["type"] != "share":
             continue
-        path, account = env[setting["key"]], env[setting["account"]]
+        path, account = env[setting["key"]], _app_account(setting, env, recipe)
         if path == share_default(engine, config, setting) and not any(
                 s.get("name") == setting["share"] for s in config.get_smb_shares()):
             pool = config.get_module_config("containers").get("pool")
@@ -303,6 +346,8 @@ def defaults(item: Dict[str, Any], config, username: str, taken: Set[int], engin
         elif kind == "share":
             values[key] = share_default(engine, config, setting) if engine else ""
             values[f"{key}_WRITERS"] = "*"
+        elif kind == "shares":
+            values[key] = ",".join(group_share_names(config))
         elif kind == "password":
             values[key] = secrets.token_urlsafe(18)
         elif kind == "choice":
@@ -366,6 +411,9 @@ def resolve(item: Dict[str, Any], values: Dict[str, str], engine, config, taken:
         value = str(values.get(key, "")).strip()
         if kind == "secret":
             value = value or secrets.token_urlsafe(18)
+        if kind == "shares":
+            _chosen_shares(config, setting, value)
+            continue
         if not value:
             raise CatalogueError(f"{label} is required")
         if kind == "port":
@@ -902,7 +950,10 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     if behind:
         record_proxy = go_behind(rt, engine, config, item, env)
     sources = _recipe_files(folder, behind)
-    text = sources.pop(app_file)
+    scripts = {file_name: sources.pop(file_name) for file_name in item.get("scripts", {})}
+    shares = [s for setting in item.get("settings", []) if setting["type"] == "shares"
+              for s in _chosen_shares(config, setting, str(values.get(setting["key"], "")))]
+    text = _render_share_mounts(item, recipe_name(engine), sources.pop(app_file), shares)
     editable = {file_name: key for key, file_name in apps.app_files(engine).items()}
     files, others = {}, {}
     for file_name, content in sources.items():
@@ -923,6 +974,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         base = Path(apps.compose_file(runtime, engine, dataset)).parent
         for file_name, content in others.items():
             engine.execute_with_stdin(CATEGORY, "compose_write", content, file=str(base / file_name))
+        for file_name, content in scripts.items():
+            engine.execute_with_stdin(CATEGORY, "script_write", content,
+                                      file=str(base / item["scripts"][file_name][2:] / file_name))
         for path_text, uid, gid in _folders(item, env, recipe_name(engine)):
             path = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
             engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))

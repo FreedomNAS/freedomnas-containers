@@ -261,6 +261,7 @@
         "makejail": "OPTION container=boot\nOPTION overwrite=force\nOPTION from=ghcr.io/appjail-makejails/nginx:latest"
       }
     },
-    "proxy_upstream": "address"
+    "proxy_upstream": "address",
+    "script_write": "sh -c 'umask 022 && mkdir -p \"${{1%/*}}\" && cat > \"$1\" && chmod 755 \"$1\"' script_write {file}"
   }
 }
