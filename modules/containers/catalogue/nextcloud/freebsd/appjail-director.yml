@@ -26,7 +26,7 @@ services:
     volumes:
       - html: /usr/local/www/html
       - data: /usr/local/www/data
-      - hooks: /entrypoint-hooks.d/before-starting
+      - hooks: /entrypoint-hooks.d
       #@shares
     oci:
       environment:

@@ -1,6 +1,6 @@
 #!/bin/sh
 # FreedomNAS: every group share mounted under /shares becomes an External storage of the same name.
-set -e
+# A failure is reported and never stops Nextcloud from starting.
 occ() { php /usr/local/www/html/occ "$@"; }
 occ app:enable files_external >/dev/null
 occ config:system:set files_external_allow_create_new_local --value=true --type=boolean >/dev/null
@@ -11,6 +11,7 @@ for dir in /shares/*/; do
     if printf '%s' "$existing" | grep -q -e "\"mount_point\":\"/$name\"" -e "\"mount_point\":\"\\\\/$name\""; then
         continue
     fi
-    occ files_external:create "/$name" local null::null -c datadir="${dir%/}" >/dev/null
+    occ files_external:create "/$name" local null::null -c datadir="${dir%/}" >/dev/null || continue
     echo "FreedomNAS: $name is an External storage"
 done
+exit 0

@@ -22,5 +22,8 @@
     "linux": {"#@shares": "      - {path}:/shares/{name}"},
     "freebsd": {"#@shares": "      - share-{name}: /shares/{name}", "#@share-volumes": "  share-{name}:\n    device: {path}"}
   },
-  "scripts": {"freedomnas-shares.sh": "./hooks"}
+  "scripts": {"freedomnas-move.sh": ["./hooks/pre-upgrade", "./hooks/before-starting"],
+              "freedomnas-shares.sh": ["./hooks/before-starting"]},
+  "owned": [{"path": "./html", "owner": {"linux": "33:33", "freebsd": "80:80"}},
+            {"setting": "DATA", "owner": {"linux": "33:33", "freebsd": "80:80"}}]
 }

@@ -43,8 +43,13 @@ Setting types in app.json:
     password  generated unless given; shown once after the install when
               "show" is set
     secret    always generated, never shown
-`scripts` names files of the recipe written, executable, into a folder of
-the app ({"file": "./folder"}) instead of beside the recipe.
+`scripts` names files of the recipe written, executable, into folders of
+the app ({"file": ["./folder", ...]}) instead of beside the recipe.
+`owned` lists folders whose whole tree belongs to the app's account
+({"path": "./name"} or {"setting": KEY}, with "owner" per recipe): on an
+install over kept data whose folder belongs to someone else (data that
+came from another edition, where the account has another number), the tree
+is given to that account.
 `fixed` holds values the user never changes; `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
@@ -1032,9 +1037,15 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         base = Path(apps.compose_file(runtime, engine, dataset)).parent
         for file_name, content in others.items():
             engine.execute_with_stdin(CATEGORY, "compose_write", content, file=str(base / file_name))
+        for owned in item.get("owned", []):
+            path_text = owned["path"] if "path" in owned else env.get(owned["setting"], "")
+            owner = _owner_for(owned.get("owner"), recipe_name(engine))
+            path = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
+            if owner and path_text and path.is_dir() and str(path.stat().st_uid) != owner[0]:
+                engine.execute(CATEGORY, "folder_take", uid=owner[0], gid=owner[1], path=str(path), timeout=3600)
         for file_name, content in scripts.items():
-            engine.execute_with_stdin(CATEGORY, "script_write", content,
-                                      file=str(base / item["scripts"][file_name][2:] / file_name))
+            for folder in item["scripts"][file_name]:
+                engine.execute_with_stdin(CATEGORY, "script_write", content, file=str(base / folder[2:] / file_name))
         for path_text, uid, gid in _folders(item, env, recipe_name(engine)):
             path = base / path_text[2:] if path_text.startswith("./") else Path(path_text)
             engine.execute(CATEGORY, "folder_prepare", uid=uid, gid=gid, path=str(path))

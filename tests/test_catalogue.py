@@ -615,8 +615,9 @@ def test_nextcloud_mounts_every_group_share_and_writes_them(nas, config, media_s
     assert "#@shares" not in compose and "privata" not in compose
     assert media_share["apps"] == [("/tank/media", "nextcloud", "33", True),
                                    ("/tank/famiglia", "nextcloud", "33", True)]
-    [script] = [kw for c, a, kw in nas.calls if a == "script_write"]
-    assert script["file"].endswith("/hooks/freedomnas-shares.sh")
+    scripts = sorted("/".join(kw["file"].rsplit("/", 3)[-3:]) for c, a, kw in nas.calls if a == "script_write")
+    assert scripts == ["hooks/before-starting/freedomnas-move.sh", "hooks/before-starting/freedomnas-shares.sh",
+                       "hooks/pre-upgrade/freedomnas-move.sh"]
     assert not (Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "freedomnas-shares.sh").exists()
 
 
@@ -683,3 +684,14 @@ def test_a_subfolder_cannot_become_the_media_share(nas, config, media_share, tmp
     monkeypatch.setattr(catalogue.zfs_datasets, "dataset_mounted_at", lambda engine, path: None)
     with pytest.raises(catalogue.CatalogueError, match="not where a dataset"):
         install(nas, config, "jellyfin", MEDIA=str(films), MEDIA_SHARE="here")
+
+
+def test_nextcloud_over_data_of_another_edition_gets_its_folders_back(nas, config, media_share):
+    install(nas, config, "nextcloud")
+    apps.remove(runtime, nas, config, "nextcloud")
+    html = Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "html"
+    html.mkdir()
+    nas.calls.clear()
+    install(nas, config, "nextcloud")
+    taken = [kw for c, a, kw in nas.calls if a == "folder_take"]
+    assert {"uid": "33", "gid": "33", "path": str(html)} in [{k: kw[k] for k in ("uid", "gid", "path")} for kw in taken]

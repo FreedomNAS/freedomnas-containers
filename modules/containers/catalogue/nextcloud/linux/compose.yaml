@@ -20,7 +20,7 @@ services:
     volumes:
       - ./html:/var/www/html
       - ${DATA:-./data}:/var/www/html/data
-      - ./hooks:/docker-entrypoint-hooks.d/before-starting:ro
+      - ./hooks:/docker-entrypoint-hooks.d:ro
       #@shares
     environment:
       MYSQL_HOST: db
