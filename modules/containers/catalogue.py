@@ -223,7 +223,11 @@ def _accounts(config) -> List[str]:
 
 
 def share_default(engine, config, setting: Dict[str, Any]) -> str:
-    """Where the share a "share" setting names is, or will be made: <apps' pool>/<share>."""
+    """
+    Where the share a "share" setting names is, or will be made: the dataset
+    <apps' pool>/<share>, under the pool's mountpoint, or at /<pool>/<share>
+    when the pool's own dataset mounts nowhere.
+    """
     existing = next((s for s in config.get_smb_shares() if s.get("name") == setting["share"]), None)
     if existing:
         return existing["path"]
@@ -237,7 +241,7 @@ def share_default(engine, config, setting: Dict[str, Any]) -> str:
         base, _ = zfs_datasets.mountpoint_of(engine, pool)
     except Exception:
         return ""
-    return f"{base.rstrip('/')}/{setting['share']}" if base.startswith("/") else ""
+    return f"{base.rstrip('/')}/{setting['share']}" if base.startswith("/") else f"/{name}"
 
 
 def share_info(engine, config, item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -313,7 +317,11 @@ def _attach_shares(engine, config, item: Dict[str, Any], values: Dict[str, str],
             pool = config.get_module_config("containers").get("pool")
             dataset = f"{pool}/{setting['share']}"
             if not zfs_datasets.exists(engine, dataset):
-                zfs_datasets.create(engine, pool, setting["share"])
+                inherited = f"{zfs_datasets.mountpoint_of(engine, pool)[0].rstrip('/')}/{setting['share']}"
+                if inherited == path:
+                    zfs_datasets.create(engine, pool, setting["share"])
+                else:
+                    zfs_datasets.create(engine, pool, setting["share"], "path", path)
             writers = _writers(config, setting, values.get(f"{setting['key']}_WRITERS", "*"))
             groupshares.create(engine, config, setting["share"], path, setting["share"],
                                [] if writers == ["*"] else writers, everyone=writers == ["*"])

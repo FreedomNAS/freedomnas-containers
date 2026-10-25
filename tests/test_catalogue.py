@@ -28,6 +28,17 @@ def accounts(monkeypatch):
     monkeypatch.setattr(catalogue.pwd, "getpwnam", lambda name: Account())
 
 
+REAL_SHARE_DEFAULT = catalogue.share_default
+
+
+@pytest.mark.parametrize("pool_mountpoint, expected", [("/tank", "/tank/media"), ("none", "/tank/media"),
+                                                        ("/mnt/tank", "/mnt/tank/media")])
+def test_the_media_share_goes_under_the_pool_or_at_its_name(monkeypatch, config, pool_mountpoint, expected):
+    monkeypatch.setattr(catalogue.zfs_datasets, "exists", lambda engine, name: False)
+    monkeypatch.setattr(catalogue.zfs_datasets, "mountpoint_of", lambda engine, name: (pool_mountpoint, "local"))
+    assert REAL_SHARE_DEFAULT(None, config, {"share": "media"}) == expected
+
+
 @pytest.fixture(autouse=True)
 def media_share(monkeypatch, tmp_path):
     """The media share at <tmp>/pool/media; groupshares itself is tested in freedomnas-core."""
@@ -36,7 +47,9 @@ def media_share(monkeypatch, tmp_path):
         (s["path"] for s in config.get_smb_shares() if s["name"] == setting["share"]), made["path"]))
     monkeypatch.setattr(catalogue.zfs_datasets, "exists", lambda engine, name: name in made["datasets"])
     monkeypatch.setattr(catalogue.zfs_datasets, "create",
-                        lambda engine, parent, name: made["datasets"].append(f"{parent}/{name}"))
+                        lambda engine, parent, name, *where: made["datasets"].append((f"{parent}/{name}", *where)))
+    monkeypatch.setattr(catalogue.zfs_datasets, "mountpoint_of",
+                        lambda engine, name: (str(tmp_path / "pool"), "default"))
 
     def create(engine, config, name, path, group, members, everyone=False, **_):
         made["created"].append({"name": name, "path": path, "group": group, "members": members,
@@ -111,7 +124,7 @@ def test_jellyfin_gets_its_env_and_folders_owned_by_its_user(nas, config, media_
 
 def test_jellyfin_makes_the_media_share_for_everyone_and_reads_it(nas, config, media_share):
     install(nas, config, "jellyfin")
-    assert media_share["datasets"] == ["tank/media"]
+    assert media_share["datasets"] == [("tank/media",)]
     assert media_share["created"] == [{"name": "media", "path": media_share["path"], "group": "media",
                                        "members": [], "everyone": True}]
     assert media_share["apps"] == [(media_share["path"], "jellyfin", "1001", False)]
