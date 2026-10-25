@@ -12,6 +12,14 @@ creates the app's own folders owned by the account the app runs as.
 
 Setting types in app.json:
     port      a free TCP port on the NAS
+    share     a group share of the NAS the app serves files from ("share":
+              its name and group, "access": read or write, "account": the
+              key holding the uid the app runs as); defaults to that share,
+              made at install when missing (a dataset of the apps' pool,
+              shared over SMB, its members from <KEY>_WRITERS: "*" for
+              every account, or names separated by commas) and kept when
+              the app goes; the app gets its own entry in the share's ACL.
+              Another directory of a pool is taken as a plain folder
     folder    ./name inside the app's dataset, or a directory of a pool;
               offered at every UI level. "owner": "uid:gid" (or
               {recipe: "uid:gid"}) gives the folder to that id instead of
@@ -72,8 +80,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 try:
-    from freedomnas import tls
+    from freedomnas import datasets as zfs_datasets, groupshares, tls
 except ImportError:
+    import datasets as zfs_datasets  # type: ignore[no-redef]
+    import groupshares  # type: ignore[no-redef]
     import tls  # type: ignore[no-redef]
 
 
@@ -204,7 +214,70 @@ def _accounts(config) -> List[str]:
     return [u.get("username") for u in (config.to_dict().get("users") or []) if u.get("username")]
 
 
-def defaults(item: Dict[str, Any], config, username: str, taken: Set[int]) -> Dict[str, str]:
+def share_default(engine, config, setting: Dict[str, Any]) -> str:
+    """Where the share a "share" setting names is, or will be made: <apps' pool>/<share>."""
+    existing = next((s for s in config.get_smb_shares() if s.get("name") == setting["share"]), None)
+    if existing:
+        return existing["path"]
+    pool = (config.get_module_config("containers") or {}).get("pool") or ""
+    if not pool:
+        return ""
+    name = f"{pool}/{setting['share']}"
+    try:
+        if zfs_datasets.exists(engine, name):
+            return zfs_datasets.mountpoint_of(engine, name)[0]
+        base, _ = zfs_datasets.mountpoint_of(engine, pool)
+    except Exception:
+        return ""
+    return f"{base.rstrip('/')}/{setting['share']}" if base.startswith("/") else ""
+
+
+def share_info(engine, config, item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """For the install form: each share setting's share, whether it exists, and its members."""
+    info = {}
+    for setting in item.get("settings", []):
+        if setting["type"] != "share":
+            continue
+        existing = next((s for s in config.get_smb_shares() if s.get("name") == setting["share"]), None)
+        info[setting["key"]] = {
+            "name": setting["share"], "path": share_default(engine, config, setting),
+            "exists": existing is not None,
+            "members": groupshares.members_of(config, existing["group"]) if existing and existing.get("group") else [],
+        }
+    return info
+
+
+def _writers(config, setting: Dict[str, Any], value: str) -> List[str]:
+    value = value.strip()
+    if value in ("", "*"):
+        return ["*"]
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    unknown = [n for n in names if n not in _accounts(config)]
+    if unknown:
+        raise CatalogueError(f"{setting.get('label', setting['key'])}: no account named {', '.join(unknown)}")
+    return names
+
+
+def _attach_shares(engine, config, item: Dict[str, Any], values: Dict[str, str], env: Dict[str, str],
+                   name: str) -> None:
+    """Make the shares the app serves when they are missing, and let the app in."""
+    for setting in item.get("settings", []):
+        if setting["type"] != "share":
+            continue
+        path, account = env[setting["key"]], env[setting["account"]]
+        if path == share_default(engine, config, setting) and not any(
+                s.get("name") == setting["share"] for s in config.get_smb_shares()):
+            pool = config.get_module_config("containers").get("pool")
+            dataset = f"{pool}/{setting['share']}"
+            if not zfs_datasets.exists(engine, dataset):
+                zfs_datasets.create(engine, pool, setting["share"])
+            writers = _writers(config, setting, values.get(f"{setting['key']}_WRITERS", "*"))
+            groupshares.create(engine, config, setting["share"], path, setting["share"],
+                               [] if writers == ["*"] else writers, everyone=writers == ["*"])
+        groupshares.add_app(engine, config, path, name, account, setting.get("access") == "write")
+
+
+def defaults(item: Dict[str, Any], config, username: str, taken: Set[int], engine=None) -> Dict[str, str]:
     values: Dict[str, str] = {}
     timezone = (config.to_dict().get("system") or {}).get("timezone") or "UTC"
     for setting in item.get("settings", []):
@@ -227,6 +300,9 @@ def defaults(item: Dict[str, Any], config, username: str, taken: Set[int]) -> Di
             values[key] = _local_address() or ""
         elif kind == "secret":
             continue
+        elif kind == "share":
+            values[key] = share_default(engine, config, setting) if engine else ""
+            values[f"{key}_WRITERS"] = "*"
         elif kind == "password":
             values[key] = secrets.token_urlsafe(18)
         elif kind == "choice":
@@ -300,6 +376,11 @@ def resolve(item: Dict[str, Any], values: Dict[str, str], engine, config, taken:
         elif kind == "folder":
             _check_folder(engine, value, setting)
             value = value if value.startswith("./") else value.rstrip("/") or value
+        elif kind == "share":
+            value = value.rstrip("/") or value
+            if value != share_default(engine, config, setting):
+                _check_folder(engine, value, {})
+            _writers(config, setting, str(values.get(f"{key}_WRITERS", "*")))
         elif kind == "user":
             if value not in _accounts(config):
                 raise CatalogueError(f"{label}: '{value}' is not a FreedomNAS account")
@@ -851,6 +932,7 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         names = local_dns_text(item, config)
         if names is not None:
             engine.execute_with_stdin(CATEGORY, "compose_write", names, file=str(_local_dns_path(base, item)))
+        _attach_shares(engine, config, item, values, env, name)
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise

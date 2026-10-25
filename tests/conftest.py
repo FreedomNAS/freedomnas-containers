@@ -159,6 +159,7 @@ class FakeConfig:
         self.others = {}
         self.users = [{"username": u} for u in users]
         self.timezone = timezone
+        self.smb = []
 
     def to_dict(self):
         return {"users": self.users, "system": {"timezone": self.timezone}}
@@ -170,6 +171,21 @@ class FakeConfig:
 
     def set_module_config(self, module_id, section):
         self.section = section
+
+    def get_smb_shares(self):
+        return self.smb
+
+    def add_smb_share(self, share):
+        self.smb = [s for s in self.smb if s["name"] != share["name"]] + [share]
+
+    def get_users(self):
+        return self.users
+
+    def get_user(self, name):
+        return next((u for u in self.users if u["username"] == name), None)
+
+    def add_user(self, user):
+        self.users = [u for u in self.users if u["username"] != user["username"]] + [user]
 
 
 @pytest.fixture

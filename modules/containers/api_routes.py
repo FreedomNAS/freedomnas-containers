@@ -305,7 +305,8 @@ def _catalogue_entry(entry_id: str, username: str) -> dict:
     while name in installed:
         name, n = f"{item['id']}{n}", n + 1
     return {**catalogue.summary(item, catalogue.recipe(engine, item) is not None), "app_name": name,
-            "defaults": catalogue.defaults(item, config, username, taken),
+            "defaults": catalogue.defaults(item, config, username, taken, engine),
+            "shares": catalogue.share_info(engine, config, item),
             "users": catalogue._accounts(config),
             "folders": catalogue.pool_folders(engine)}
 

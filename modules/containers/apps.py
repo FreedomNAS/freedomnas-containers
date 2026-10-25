@@ -37,8 +37,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
+    from freedomnas import groupshares
     from freedomnas.reconcile import ActionResult
 except ImportError:
+    import groupshares  # type: ignore[no-redef]
     from reconcile import ActionResult  # type: ignore[no-redef]
 
 
@@ -354,6 +356,7 @@ def remove(runtime, engine, config, name: str, destroy_data: bool = False) -> No
             engine.execute("zfs", "dataset_destroy_recursive", timeout=300, dataset=app["dataset"])
     del apps[name]
     _save(config, apps)
+    groupshares.remove_app(engine, config, name)
 
 
 def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:

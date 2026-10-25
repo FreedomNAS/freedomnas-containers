@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('catalogue-grid').addEventListener('click', onCatalogueClick);
   document.getElementById('form-install').addEventListener('submit', installFromCatalogue);
   document.getElementById('install-settings').addEventListener('change', onFolderSelect);
+  document.getElementById('install-settings').addEventListener('change', onWritersChange);
   loadStatus();
 });
 
@@ -235,9 +236,47 @@ async function loadCatalogue() {
     </div>`).join('');
 }
 
-function settingField(s, value, users, folders) {
+function shareField(s, value, users, folders, info, hint) {
+  const id = `f-set-${esc(s.key)}`;
+  const choices = [...(info.path ? [[info.path, info.exists ? `The ${info.name} share (${info.path})`
+                                                            : `The ${info.name} share, made now (${info.path})`]] : []),
+                   ...folders.filter(f => f !== info.path).map(f => [f, f])];
+  const known = choices.some(([v]) => v === value);
+  const writers = info.exists ? '' : `
+    <div data-writers data-share-path="${esc(info.path || '')}" style="margin-top:10px"${value === info.path ? '' : ' hidden'}>
+      <label for="${id}-writers">Who can use it over SMB (they read and write it)</label>
+      <select id="${id}-writers" class="input" data-writers-mode>
+        <option value="*">Every account, also those added later</option>
+        <option value="some">These accounts</option>
+      </select>
+      <div data-writers-list hidden style="margin-top:6px">${users.map(u => `
+        <label class="checkbox-group"><input type="checkbox" value="${esc(u)}" id="${id}-w-${esc(u)}">
+          <label for="${id}-w-${esc(u)}">${esc(u)}</label></label>`).join('')}</div>
+      <input type="hidden" data-key="${esc(s.key)}_WRITERS" data-folder value="*">
+    </div>`;
+  return `<div class="form-group"><label for="${id}">${esc(s.label || s.key)}</label>
+    <select id="${id}" class="input" data-folder-select>${choices.map(([v, l]) =>
+      `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+      <option value=""${known ? '' : ' selected'}>Another folder…</option></select>
+    <input class="input font-mono" style="margin-top:6px" data-key="${esc(s.key)}" data-folder
+      value="${esc(value)}" placeholder="/tank/folder" aria-label="${esc(s.label || s.key)}"${known ? ' hidden' : ''}>
+    ${hint}${writers}</div>`;
+}
+
+function onWritersChange(e) {
+  const box = e.target.closest('[data-writers]');
+  if (!box) return;
+  const some = box.querySelector('[data-writers-mode]').value === 'some';
+  box.querySelector('[data-writers-list]').hidden = !some;
+  box.querySelector('input[type="hidden"]').value = some
+    ? [...box.querySelectorAll('[data-writers-list] input:checked')].map(b => b.value).join(',')
+    : '*';
+}
+
+function settingField(s, value, users, folders, shares = {}) {
   const id = `f-set-${esc(s.key)}`;
   const hint = s.hint ? `<span class="form-hint">${esc(s.hint)}</span>` : '';
+  if (s.type === 'share') return shareField(s, value, users, folders, shares[s.key] || {}, hint);
   let input;
   if (s.type === 'folder') {
     const inside = String(s.default || '').startsWith('./') ? s.default : null;
@@ -270,6 +309,8 @@ function onFolderSelect(e) {
   const input = select.parentElement.querySelector('[data-folder]');
   input.hidden = select.value !== '';
   input.value = select.value;
+  const writers = select.parentElement.querySelector('[data-writers]');
+  if (writers) writers.hidden = select.value !== writers.dataset.sharePath;
   if (!select.value) input.focus();
 }
 
@@ -292,9 +333,9 @@ async function onCatalogueClick(e) {
   document.getElementById('install-note').hidden = !c.note;
   document.getElementById('f-install-name').value = c.app_name;
   document.getElementById('install-settings').innerHTML =
-    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [])).join('');
+    c.settings.map(s => settingField(s, c.defaults[s.key] || '', c.users || [], c.folders || [], c.shares || {})).join('');
   document.getElementById('install-assisted').hidden = UILevel.current() !== 'assisted';
-  const hasFolders = c.settings.some(s => s.type === 'folder');
+  const hasFolders = c.settings.some(s => s.type === 'folder' || s.type === 'share');
   document.getElementById('install-assisted-folders').hidden = UILevel.current() !== 'assisted' || !hasFolders;
   document.getElementById('install-assisted').textContent = `${hasFolders ? 'Everything else uses its'
     : 'It is installed with its'} usual settings; passwords are made up for you and shown once at the end.`;

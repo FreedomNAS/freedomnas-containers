@@ -6,8 +6,8 @@
   "web": {"port": "PORT", "inner": {"linux": 8096, "freebsd": 8096}, "service": "jellyfin"},
   "settings": [
     {"key": "PORT", "label": "Web port", "type": "port", "default": "8096"},
-    {"key": "MEDIA", "label": "Media folder", "type": "folder", "default": "./media",
-     "hint": "A folder of your pool with your films and music, e.g. /tank/media; read only for Jellyfin."},
+    {"key": "MEDIA", "label": "Media folder", "type": "share", "share": "media", "access": "read", "account": "PUID",
+     "hint": "The NAS's media share: put your films and music there over SMB (\\\\<NAS>\\media). Made now if it is missing and kept if Jellyfin goes; Jellyfin only reads it."},
     {"key": "USER", "label": "Run as", "type": "user", "uid": "PUID", "gid": "PGID",
      "hint": "The account Jellyfin's files belong to; it needs to read the media folder."},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}

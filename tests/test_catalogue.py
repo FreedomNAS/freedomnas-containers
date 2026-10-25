@@ -28,6 +28,30 @@ def accounts(monkeypatch):
     monkeypatch.setattr(catalogue.pwd, "getpwnam", lambda name: Account())
 
 
+@pytest.fixture(autouse=True)
+def media_share(monkeypatch, tmp_path):
+    """The media share at <tmp>/pool/media; groupshares itself is tested in freedomnas-core."""
+    made = {"path": str(tmp_path / "pool" / "media"), "created": [], "apps": [], "datasets": []}
+    monkeypatch.setattr(catalogue, "share_default", lambda engine, config, setting: next(
+        (s["path"] for s in config.get_smb_shares() if s["name"] == setting["share"]), made["path"]))
+    monkeypatch.setattr(catalogue.zfs_datasets, "exists", lambda engine, name: name in made["datasets"])
+    monkeypatch.setattr(catalogue.zfs_datasets, "create",
+                        lambda engine, parent, name: made["datasets"].append(f"{parent}/{name}"))
+
+    def create(engine, config, name, path, group, members, everyone=False, **_):
+        made["created"].append({"name": name, "path": path, "group": group, "members": members,
+                                "everyone": everyone})
+        config.add_smb_share({"name": name, "path": path, "group": group})
+
+    def add_app(engine, config, path, app, account, write):
+        made["apps"].append((path, app, account, write))
+        return True
+
+    monkeypatch.setattr(catalogue.groupshares, "create", create)
+    monkeypatch.setattr(catalogue.groupshares, "add_app", add_app)
+    return made
+
+
 @pytest.fixture
 def nas(engine):
     engine.outputs[("containers", "listening")] = (LISTENING, "")
@@ -36,7 +60,7 @@ def nas(engine):
 
 def install(engine, config, entry_id, name=None, **changes):
     taken = catalogue.used_ports(containers, engine, config=config)
-    values = catalogue.defaults(catalogue.entry(entry_id), config, "sarah", taken)
+    values = catalogue.defaults(catalogue.entry(entry_id), config, "sarah", taken, engine)
     values.update(changes)
     return catalogue.install(runtime, apps, containers, engine, config, entry_id, name or entry_id, values)
 
@@ -74,14 +98,52 @@ def test_defaults_skip_ports_in_use_and_use_the_system_timezone(nas, config):
     assert values["PORT"] == "8097" and values["TZ"] == "Europe/Rome" and values["USER"] == "sarah"
 
 
-def test_jellyfin_gets_its_env_and_folders_owned_by_its_user(nas, config):
+def test_jellyfin_gets_its_env_and_folders_owned_by_its_user(nas, config, media_share):
     result = install(nas, config, "jellyfin")
     env = env_of(nas, "jellyfin")
-    assert env["PUID"] == "1001" and env["MEDIA"] == "./media" and env["PORT"] == "8096"
+    assert env["PUID"] == "1001" and env["MEDIA"] == media_share["path"] and env["PORT"] == "8096"
+    assert "MEDIA_WRITERS" not in env
     owned = {Path(p).name: o for p, o in nas.owners.items()}
-    assert owned == {"config": ("1001", "1001"), "cache": ("1001", "1001"), "media": ("1001", "1001")}
+    assert owned == {"config": ("1001", "1001"), "cache": ("1001", "1001")}
     assert config.section["apps"]["jellyfin"]["catalogue"] == "jellyfin"
     assert result["web_port"] == "8096" and result["shown"] == {}
+
+
+def test_jellyfin_makes_the_media_share_for_everyone_and_reads_it(nas, config, media_share):
+    install(nas, config, "jellyfin")
+    assert media_share["datasets"] == ["tank/media"]
+    assert media_share["created"] == [{"name": "media", "path": media_share["path"], "group": "media",
+                                       "members": [], "everyone": True}]
+    assert media_share["apps"] == [(media_share["path"], "jellyfin", "1001", False)]
+
+
+def test_the_media_share_can_be_made_for_some_accounts(nas, config, media_share):
+    config.users.append({"username": "luca"})
+    install(nas, config, "jellyfin", MEDIA_WRITERS="luca, sarah")
+    assert media_share["created"][0]["members"] == ["luca", "sarah"]
+    assert media_share["created"][0]["everyone"] is False
+
+
+def test_writers_must_be_accounts(nas, config, media_share):
+    with pytest.raises(catalogue.CatalogueError, match="nessuno"):
+        install(nas, config, "jellyfin", MEDIA_WRITERS="nessuno")
+    assert media_share["created"] == []
+
+
+def test_a_second_jellyfin_uses_the_media_share_already_there(nas, config, media_share):
+    install(nas, config, "jellyfin")
+    install(nas, config, "jellyfin", name="jellyfin2", PORT="8097")
+    assert len(media_share["created"]) == 1
+    assert [a[1] for a in media_share["apps"]] == ["jellyfin", "jellyfin2"]
+
+
+def test_another_folder_makes_no_share(nas, config, media_share, tmp_path):
+    media = tmp_path / "films"
+    media.mkdir()
+    nas.extra_datasets.append(f"tank/films\t1\t1\t1\t{media}\tfilesystem\tyes\t-")
+    install(nas, config, "jellyfin", MEDIA=str(media))
+    assert media_share["created"] == []
+    assert media_share["apps"] == [(str(media), "jellyfin", "1001", False)]
 
 
 def test_a_media_folder_must_be_on_a_pool(nas, config, tmp_path):
@@ -212,7 +274,7 @@ def test_a_catalogue_compose_file_is_checked_with_its_env(nas, config):
     nas.execute_with_stdin = spy
     install(nas, config, "jellyfin")
     [(action, env_text)] = seen
-    assert action == "compose_check" and "MEDIA='./media'" in env_text
+    assert action == "compose_check" and "APP='jellyfin'" in env_text
 
 
 def test_a_failed_check_with_the_env_leaves_no_dataset(nas, config):
