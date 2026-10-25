@@ -4,7 +4,13 @@ FTLCONF_dns_listeningMode=all
 FTLCONF_ntp_sync_active=false
 FTLCONF_misc_nice=-999
 FTLCONF_misc_etc_dnsmasq_d=true
+FTLCONF_webserver_paths_webroot=/usr/local/www/pihole
+FTLCONF_files_database=/usr/local/etc/pihole/pihole-FTL.db
+FTLCONF_files_tmp_db=/usr/local/etc/pihole/pihole-tmp.db
+FTLCONF_files_gravity=/usr/local/etc/pihole/gravity.db
+FTLCONF_files_macvendor=/usr/local/etc/pihole/macvendor.db
 export FTLCONF_webserver_api_password FTLCONF_dns_listeningMode FTLCONF_ntp_sync_active FTLCONF_misc_nice FTLCONF_misc_etc_dnsmasq_d TZ
+export FTLCONF_webserver_paths_webroot FTLCONF_files_database FTLCONF_files_tmp_db FTLCONF_files_gravity FTLCONF_files_macvendor
 if [ "$HTTPS" = true ]; then
 	FTLCONF_webserver_port=80s
 	FTLCONF_webserver_tls_cert=/mnt/app/tls/tls.pem

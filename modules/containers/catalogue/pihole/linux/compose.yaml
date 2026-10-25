@@ -14,6 +14,11 @@ services:
       FTLCONF_webserver_api_password: ${WEB_PASSWORD}
       FTLCONF_dns_listeningMode: all
       FTLCONF_misc_etc_dnsmasq_d: 'true'
+      FTLCONF_webserver_paths_webroot: /var/www/html
+      FTLCONF_files_database: /etc/pihole/pihole-FTL.db
+      FTLCONF_files_tmp_db: /etc/pihole/pihole-tmp.db
+      FTLCONF_files_gravity: /etc/pihole/gravity.db
+      FTLCONF_files_macvendor: /etc/pihole/macvendor.db
       HTTPS: ${HTTPS}
     entrypoint:
       - /bin/sh
