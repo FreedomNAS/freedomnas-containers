@@ -19,7 +19,9 @@ Setting types in app.json:
               shared over SMB, its members from <KEY>_WRITERS: "*" for
               every account, or names separated by commas) and kept when
               the app goes; the app gets its own entry in the share's ACL.
-              Another directory of a pool is taken as a plain folder
+              Another directory of a pool is taken as a plain folder, or,
+              with <KEY>_SHARE "here" and when it is a dataset's own
+              directory, made that share instead
     shares    group shares of the NAS mounted into the app, by name separated
               by commas (default: all of them; empty: none); the recipe's
               "share_mounts" lines (per recipe, {name} and {path}) replace
@@ -300,6 +302,23 @@ def _app_account(setting: Dict[str, Any], env: Dict[str, str], recipe: str) -> s
     return str(account[recipe]) if isinstance(account, dict) else env[account]
 
 
+def _share_here(values: Dict[str, str], setting: Dict[str, Any]) -> bool:
+    return str(values.get(f"{setting['key']}_SHARE", "")).strip() == "here"
+
+
+def _check_share_here(engine, config, setting: Dict[str, Any], path: str) -> None:
+    label = setting.get("label", setting["key"])
+    if groupshares.share_at(config, path) is not None:
+        return
+    taken = next((s for s in config.get_smb_shares() if s.get("name") == setting["share"]), None)
+    if taken:
+        raise CatalogueError(f"{label}: there is already a share named {setting['share']}, of {taken['path']}: "
+                             "remove it on the Shares page first, or choose it")
+    if not zfs_datasets.dataset_mounted_at(engine, path):
+        raise CatalogueError(f"{label}: {path} is not where a dataset of a data pool is mounted, "
+                             "so it cannot become a share of its own")
+
+
 def _attach_shares(engine, config, item: Dict[str, Any], values: Dict[str, str], env: Dict[str, str],
                    name: str) -> None:
     """Make the shares the app serves when they are missing, and let the app in."""
@@ -322,6 +341,10 @@ def _attach_shares(engine, config, item: Dict[str, Any], values: Dict[str, str],
                     zfs_datasets.create(engine, pool, setting["share"])
                 else:
                     zfs_datasets.create(engine, pool, setting["share"], "path", path)
+            writers = _writers(config, setting, values.get(f"{setting['key']}_WRITERS", "*"))
+            groupshares.create(engine, config, setting["share"], path, setting["share"],
+                               [] if writers == ["*"] else writers, everyone=writers == ["*"])
+        elif _share_here(values, setting) and groupshares.share_at(config, path) is None:
             writers = _writers(config, setting, values.get(f"{setting['key']}_WRITERS", "*"))
             groupshares.create(engine, config, setting["share"], path, setting["share"],
                                [] if writers == ["*"] else writers, everyone=writers == ["*"])
@@ -436,6 +459,8 @@ def resolve(item: Dict[str, Any], values: Dict[str, str], engine, config, taken:
             value = value.rstrip("/") or value
             if value != share_default(engine, config, setting):
                 _check_folder(engine, value, {})
+                if _share_here(values, setting):
+                    _check_share_here(engine, config, setting, value)
             _writers(config, setting, str(values.get(f"{key}_WRITERS", "*")))
         elif kind == "user":
             if value not in _accounts(config):

@@ -652,3 +652,34 @@ def test_a_reinstall_on_kept_data_offers_and_warns_about_its_old_folders(nas, co
 def test_a_first_install_has_no_kept_folders(nas, config):
     assert catalogue.kept_folders(runtime, apps, nas, config, catalogue.entry("jellyfin"), "jellyfin") == {}
     assert "warnings" not in install(nas, config, "jellyfin")
+
+
+def test_another_folder_can_become_the_media_share(nas, config, media_share, tmp_path, monkeypatch):
+    films = tmp_path / "films"
+    films.mkdir()
+    nas.extra_datasets.append(f"tank/films\t1\t1\t1\t{films}\tfilesystem\tyes\t-")
+    monkeypatch.setattr(catalogue.zfs_datasets, "dataset_mounted_at", lambda engine, path: "tank/films")
+    install(nas, config, "jellyfin", MEDIA=str(films), MEDIA_SHARE="here", MEDIA_WRITERS="sarah")
+    assert media_share["datasets"] == []
+    assert media_share["created"] == [{"name": "media", "path": str(films), "group": "media",
+                                       "members": ["sarah"], "everyone": False}]
+    assert media_share["apps"] == [(str(films), "jellyfin", "1001", False)]
+
+
+def test_a_folder_cannot_become_the_media_share_while_another_has_the_name(nas, config, media_share, tmp_path):
+    films = tmp_path / "films"
+    films.mkdir()
+    nas.extra_datasets.append(f"tank/films\t1\t1\t1\t{films}\tfilesystem\tyes\t-")
+    config.smb = [{"name": "media", "path": "/tank/media", "group": "media"}]
+    with pytest.raises(catalogue.CatalogueError, match="already a share named media"):
+        install(nas, config, "jellyfin", MEDIA=str(films), MEDIA_SHARE="here")
+    assert "tank/apps/jellyfin" not in nas.datasets
+
+
+def test_a_subfolder_cannot_become_the_media_share(nas, config, media_share, tmp_path, monkeypatch):
+    films = tmp_path / "films"
+    films.mkdir()
+    nas.extra_datasets.append(f"tank/films\t1\t1\t1\t{films}\tfilesystem\tyes\t-")
+    monkeypatch.setattr(catalogue.zfs_datasets, "dataset_mounted_at", lambda engine, path: None)
+    with pytest.raises(catalogue.CatalogueError, match="not where a dataset"):
+        install(nas, config, "jellyfin", MEDIA=str(films), MEDIA_SHARE="here")

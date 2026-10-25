@@ -245,6 +245,15 @@ function shareField(s, value, users, folders, info, hint) {
                                                             : `The ${info.name} share, made now (${info.path})`]] : []),
                    ...folders.filter(f => f !== info.path).map(f => [f, f])];
   const known = choices.some(([v]) => v === value);
+  const here = `
+    <div data-share-here style="margin-top:10px"${value === info.path ? ' hidden' : ''}>
+      <label class="checkbox-group"><input type="checkbox" id="${id}-here"${info.exists ? ' disabled' : ''}>
+        <label for="${id}-here">Share this folder over SMB as the ${esc(info.name)} share</label></label>
+      <span class="form-hint">${info.exists
+        ? `There is already a share named ${esc(info.name)}, of ${esc(info.path)}: remove it on the Shares page first to share this folder instead.`
+        : 'It must be a dataset of its own; it and its files become the group\'s, the accounts chosen below.'}</span>
+      <input type="hidden" data-key="${esc(s.key)}_SHARE" data-folder value="">
+    </div>`;
   const writers = info.exists ? '' : `
     <div data-writers data-share-path="${esc(info.path || '')}" style="margin-top:10px"${value === info.path ? '' : ' hidden'}>
       <label for="${id}-writers">Who can use it over SMB (they read and write it)</label>
@@ -263,10 +272,25 @@ function shareField(s, value, users, folders, info, hint) {
       <option value=""${known ? '' : ' selected'}>Another folder…</option></select>
     <input class="input font-mono" style="margin-top:6px" data-key="${esc(s.key)}" data-folder
       value="${esc(value)}" placeholder="/tank/folder" aria-label="${esc(s.label || s.key)}"${known ? ' hidden' : ''}>
-    ${hint}${writers}</div>`;
+    ${hint}${here}${writers}</div>`;
+}
+
+function showShareChoices(group) {
+  const select = group.querySelector('[data-folder-select]');
+  const value = group.querySelector('[data-folder]').value.trim();
+  const here = group.querySelector('[data-share-here]');
+  const writers = group.querySelector('[data-writers]');
+  if (!here) return;
+  const isShare = writers ? value === writers.dataset.sharePath : select.value === select.options[0].value;
+  here.hidden = isShare || !value;
+  const ticked = !here.hidden && here.querySelector('input[type="checkbox"]').checked;
+  here.querySelector('input[type="hidden"]').value = ticked ? 'here' : '';
+  if (writers) writers.hidden = !(isShare || ticked);
 }
 
 function onWritersChange(e) {
+  const group = e.target.closest('.form-group');
+  if (group && group.querySelector('[data-share-here]')) showShareChoices(group);
   const box = e.target.closest('[data-writers]');
   if (!box) return;
   const some = box.querySelector('[data-writers-mode]').value === 'some';
@@ -338,8 +362,7 @@ function onFolderSelect(e) {
   const input = select.parentElement.querySelector('[data-folder]');
   input.hidden = select.value !== '';
   input.value = select.value;
-  const writers = select.parentElement.querySelector('[data-writers]');
-  if (writers) writers.hidden = select.value !== writers.dataset.sharePath;
+  showShareChoices(select.parentElement);
   if (!select.value) input.focus();
 }
 
