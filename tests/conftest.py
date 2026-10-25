@@ -119,8 +119,10 @@ class FakeEngine:
         if key == ("containers", "data_copy"):
             shutil.copytree(kw["source"], kw["target"], dirs_exist_ok=True)
             return "", ""
-        if key == ("containers", "file_read") and key not in self.outputs:
+        if key in (("containers", "file_read"), ("proxy", "file_read")) and key not in self.outputs:
             return self.files.get(kw["file"], ""), ""
+        if key == ("proxy", "file_remove"):
+            self.files.pop(kw["file"], None)
         if key == ("services", "is_running"):
             return ("yes" if kw["service_name"] in self.running else ""), ""
         if key == ("services", "start"):
@@ -142,7 +144,7 @@ class FakeEngine:
             raise CommandExecutionError(f"Command failed\nCommand: x\nStderr: {category}.{action} refused")
         if (category, action) in (("containers", "compose_write"), ("containers", "env_write")):
             Path(kw["file"]).write_text(stdin_data)
-        if (category, action) == ("containers", "file_write"):
+        if (category, action) in (("containers", "file_write"), ("proxy", "site_write")):
             self.files[kw["file"]] = stdin_data
         self.stdin = stdin_data
         return "", ""

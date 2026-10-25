@@ -744,7 +744,24 @@ def proxy_sync(runtime, apps, rt, engine, config) -> List:
             results.append(apps._result("proxy.sites", sites=sorted(wanted)))
     except Exception as exc:
         results.append(apps._result("proxy.sites", apps._stderr(exc)))
+    if changed and on:
+        results += _proxy_reconcile(apps, engine, config)
     return results
+
+
+def _proxy_reconcile(apps, engine, config) -> List:
+    """The proxy module's own reconcile, so what follows the sites (the network's DNS records) does too."""
+    try:
+        from freedomnas.module_loader import ModuleLoader
+    except ImportError:
+        return []
+    try:
+        for manifest, module in ModuleLoader(engine, config).instances():
+            if manifest.get("id", module.name) == PROXY_CATEGORY:
+                return list(module.reconcile(config.get_module_config(PROXY_CATEGORY) or {}, "additive") or [])
+    except Exception as exc:
+        return [apps._result("proxy.follow", str(exc))]
+    return []
 
 
 def _move(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], item: Dict[str, Any],

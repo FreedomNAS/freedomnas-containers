@@ -517,3 +517,14 @@ def test_nextcloud_also_trusts_the_own_domain(config, monkeypatch):
     config.others["proxy"] = {"enabled": True, "names": True, "acme": {"domain": "nas.example.org"}}
     values = catalogue.defaults(catalogue.entry("nextcloud"), config, "sarah", set())
     assert values["TRUSTED_DOMAINS"].split()[-2:] == ["*.nas.home.arpa", "*.nas.example.org"]
+
+
+def test_changed_sites_let_the_proxy_follow_them(behind, config, monkeypatch):
+    seen = []
+    monkeypatch.setattr(catalogue, "_proxy_reconcile", lambda apps_, e, c: seen.append(1) or [])
+    install(behind, config, "jellyfin")
+    apps.set_state(runtime, behind, config, "jellyfin", "up")
+    catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    assert seen == [1]
+    catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    assert seen == [1]
