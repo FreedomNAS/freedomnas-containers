@@ -199,3 +199,28 @@ def test_reconcile_after_docker_was_started_early_twice(engine):
         [result, *_] = runtime.reconcile(engine, DESIRED)
         assert result.target_state == "applied" and "moved aside" in result.params["done"]
         engine.running.add("docker")
+
+
+def test_reconcile_installs_a_missing_runtime_then_sets_it_up(engine):
+    engine.installed = False
+    original = engine.execute
+
+    def execute(category, action, **kw):
+        if (category, action) == ("packages", "install"):
+            engine.installed = True
+        return original(category, action, **kw)
+
+    engine.execute = execute
+    results = runtime.reconcile(engine, DESIRED)
+    assert results[0].action == "containers.install" and results[0].target_state == "applied"
+    assert results[-1].action == "containers.start"
+
+
+def test_datasets_of_the_other_edition_give_way_to_this_edition_s(engine):
+    config = FakeConfig({"enabled": True, "pool": "tank",
+                         "datasets": {"appjail": "tank/containers/appjail", "oci": "tank/containers/oci"}})
+    desired = config.get_module_config("containers")
+    results = runtime.reconcile(engine, desired, config=config)
+    assert results[0].action == "containers.datasets" and "tank/containers/docker" in results[0].params["done"]
+    assert config.section["datasets"] == DATASETS
+    assert "tank/containers/appjail" not in engine.datasets

@@ -406,20 +406,38 @@ def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:
                         target_state="failed" if error else "applied", error=error)
 
 
-def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative") -> List[ActionResult]:
+def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative", config=None) -> List[ActionResult]:
+    """
+    Bring the runtime the configuration records back. A system without it
+    (a fresh install restored from its pool, another edition) gets it
+    installed, as the page's Install does; data directories recorded by the
+    other edition's runtime give way to this edition's on the same pool,
+    created when missing and recorded in `config` (the others stay on the
+    pool, untouched).
+    """
     datasets = desired.get("datasets") or {}
     if not desired.get("enabled") or not datasets:
         return []
+    results: List[ActionResult] = []
     if not installed(engine):
-        return [_result("runtime", f"{runtime_name(engine)} is not installed: install it from the Containers page")]
+        try:
+            install(engine)
+            results.append(_result("install", runtime=runtime_name(engine)))
+        except (ContainersError,) + ENGINE_ERRORS as exc:
+            return [_result("runtime", f"{runtime_name(engine)} could not be installed: {exc}")]
     pool = desired.get("pool") or next(iter(datasets.values())).split("/")[0]
     try:
         if pool not in pool_names(engine):
-            return [_result("datasets", f"Pool '{pool}' is not imported", pool=pool)]
+            return results + [_result("datasets", f"Pool '{pool}' is not imported", pool=pool)]
     except ENGINE_ERRORS as exc:
-        return [_result("datasets", str(exc), pool=pool)]
+        return results + [_result("datasets", str(exc), pool=pool)]
+    here = datasets_for(engine, pool)
+    if here and set(datasets) != set(here):
+        datasets = here
+        if config is not None:
+            config.set_module_config(MODULE_ID, {**config.get_module_config(MODULE_ID), "datasets": here})
+        results.append(_result("datasets", pool=pool, done=f"this edition's: {', '.join(sorted(here.values()))}"))
 
-    results: List[ActionResult] = []
     dirs = data_dirs(engine)
     try:
         unmounted = [name for name, ds in datasets.items() if not dataset_state(engine, ds)["mounted"]]

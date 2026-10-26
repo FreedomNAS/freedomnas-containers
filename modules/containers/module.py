@@ -85,7 +85,7 @@ class ContainersModule(FreedomNASModule):
             return False, str(exc)
 
     def reconcile(self, desired: dict, mode: str = "declarative") -> List:
-        results = runtime.reconcile(self._engine, desired, mode)
+        results = runtime.reconcile(self._engine, desired, mode, self._config)
         if any(r.target_state == "failed" for r in results):
             return results
         adopt = lambda name, app, file: catalogue.adopt(runtime, apps, containers, self._engine, self._config,
