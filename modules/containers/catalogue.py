@@ -50,7 +50,14 @@ the app ({"file": ["./folder", ...]}) instead of beside the recipe.
 install over kept data whose folder belongs to someone else (data that
 came from another edition, where the account has another number), the tree
 is given to that account.
-`fixed` holds values the user never changes; `prepare` lists folders
+`fixed` holds values the user never changes (an app's release, such as
+NEXTCLOUD_VERSION: the same on every edition, so its data can move between
+them); the app's Update writes the catalogue's current ones into its .env
+(refresh_fixed) before fetching the images again. `data_version` names the
+file of the app's data that records the release that last wrote it
+({"file", "pattern", "key"}): an install over kept data written by a newer
+release than `fixed[key]` is refused, since the app cannot go back.
+`prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
 own certificate and key, cert.pem and key.pem, both in one file,
@@ -991,6 +998,58 @@ def _move(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], ite
                       name, file)
 
 
+def _release(text: str) -> tuple:
+    return tuple(int(p) for p in text.split(".") if p.isdigit())
+
+
+def data_release(item: Dict[str, Any], base: Path) -> Optional[str]:
+    """The release that last wrote the app's kept data, from its `data_version` file, or None."""
+    spec = item.get("data_version")
+    if not spec:
+        return None
+    try:
+        match = re.search(spec["pattern"], (base / spec["file"][2:]).read_text())
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
+def check_data_release(item: Dict[str, Any], base: Path, env: Dict[str, str]) -> None:
+    spec = item.get("data_version")
+    found = data_release(item, base)
+    if not spec or not found:
+        return
+    wanted = env.get(spec["key"], "")
+    if wanted and _release(found) > _release(wanted):
+        raise CatalogueError(
+            f"{item['name']}'s data was last written by release {found}, newer than the {wanted} this NAS "
+            f"installs: {item['name']} never goes back to an older release. Update FreedomNAS until its "
+            f"catalogue reaches {found} or later, then install it again on the kept data")
+
+
+def refresh_fixed(runtime, apps, engine, config, name: str) -> bool:
+    """
+    Bring a catalogue app's .env to the catalogue's current `fixed` values
+    (a newer release), refusing what would take its data back. Returns
+    whether anything changed.
+    """
+    app = ((config.get_module_config("containers") or {}).get("apps") or {}).get(name) or {}
+    if not app.get("catalogue"):
+        return False
+    item = entry(app["catalogue"])
+    fixed = item.get("fixed") or {}
+    env_path = Path(apps.compose_file(runtime, engine, app["dataset"])).with_name(ENV_FILE)
+    if not fixed or not env_path.exists():
+        return False
+    env = parse_env(env_path.read_text())
+    if all(env.get(k) == v for k, v in fixed.items()):
+        return False
+    env.update(fixed)
+    check_data_release(item, env_path.parent, env)
+    engine.execute_with_stdin(CATEGORY, "env_write", render_env(env), file=str(env_path))
+    return True
+
+
 def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             values: Dict[str, str]) -> Dict[str, Any]:
     """
@@ -1025,6 +1084,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
             others[file_name] = content
     kept = kept_folders(runtime, apps, engine, config, item, name)
     dataset = apps.dataset_for(config.get_module_config("containers").get("pool") or "", name)
+    if runtime.dataset_state(engine, dataset)["exists"] and name not in (
+            config.get_module_config("containers").get("apps") or {}):
+        check_data_release(item, Path(apps.compose_file(runtime, engine, dataset)).parent, env)
     if runtime.dataset_state(engine, dataset)["exists"] and name not in (
             config.get_module_config("containers").get("apps") or {}):
         env.update(_kept_secrets(item, Path(apps.compose_file(runtime, engine, dataset)).with_name(ENV_FILE)))

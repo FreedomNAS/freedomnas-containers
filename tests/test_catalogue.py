@@ -695,3 +695,48 @@ def test_nextcloud_over_data_of_another_edition_gets_its_folders_back(nas, confi
     install(nas, config, "nextcloud")
     taken = [kw for c, a, kw in nas.calls if a == "folder_take"]
     assert {"uid": "33", "gid": "33", "path": str(html)} in [{k: kw[k] for k in ("uid", "gid", "path")} for kw in taken]
+
+
+def _kept_nextcloud(nas, config, release):
+    install(nas, config, "nextcloud")
+    apps.remove(runtime, nas, config, "nextcloud")
+    base = Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"])
+    (base / "html").mkdir(exist_ok=True)
+    (base / "html" / "version.php").write_text(f"<?php\n$OC_VersionString = '{release}';\n")
+    return base
+
+
+def test_nextcloud_runs_the_catalogue_s_release(nas, config, media_share):
+    install(nas, config, "nextcloud")
+    release = catalogue.entry("nextcloud")["fixed"]["NEXTCLOUD_VERSION"]
+    assert env_of(nas, "nextcloud")["NEXTCLOUD_VERSION"] == release
+    compose = (Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / "compose.yaml").read_text()
+    assert "image: nextcloud:${NEXTCLOUD_VERSION}-apache" in compose
+
+
+def test_data_newer_than_the_catalogue_s_release_is_refused(nas, config, media_share):
+    _kept_nextcloud(nas, config, "99.0.1")
+    with pytest.raises(catalogue.CatalogueError, match="99.0.1"):
+        install(nas, config, "nextcloud")
+    assert "nextcloud" not in (config.section.get("apps") or {})
+
+
+def test_data_of_the_same_or_an_older_release_is_taken(nas, config, media_share):
+    release = catalogue.entry("nextcloud")["fixed"]["NEXTCLOUD_VERSION"]
+    _kept_nextcloud(nas, config, release)
+    install(nas, config, "nextcloud")
+    apps.remove(runtime, nas, config, "nextcloud")
+    _kept_nextcloud(nas, config, "30.0.1")
+    install(nas, config, "nextcloud")
+
+
+def test_update_brings_the_app_to_the_catalogue_s_release(nas, config, media_share, monkeypatch):
+    install(nas, config, "nextcloud")
+    env_path = Path(nas.datasets["tank/apps/nextcloud"]["mountpoint"]) / ".env"
+    old = catalogue.parse_env(env_path.read_text())
+    env_path.write_text(catalogue.render_env({**old, "NEXTCLOUD_VERSION": "34.0.5"}))
+    assert catalogue.refresh_fixed(runtime, apps, nas, config, "nextcloud")
+    new = catalogue.parse_env(env_path.read_text())
+    assert new["NEXTCLOUD_VERSION"] == catalogue.entry("nextcloud")["fixed"]["NEXTCLOUD_VERSION"]
+    assert new["ADMIN_PASSWORD"] == old["ADMIN_PASSWORD"]
+    assert not catalogue.refresh_fixed(runtime, apps, nas, config, "nextcloud")
