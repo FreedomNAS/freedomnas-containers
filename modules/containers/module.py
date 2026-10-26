@@ -88,8 +88,10 @@ class ContainersModule(FreedomNASModule):
         results = runtime.reconcile(self._engine, desired, mode)
         if any(r.target_state == "failed" for r in results):
             return results
-        adopt = lambda name, app, file: catalogue.adopt(self._engine, name, app, file)
+        adopt = lambda name, app, file: catalogue.adopt(runtime, apps, containers, self._engine, self._config,
+                                                        name, app, file)
+        moved = lambda app: catalogue.moved(self._engine, app)
         results += catalogue.refresh_tls(runtime, apps, self._engine, desired)
         results += catalogue.refresh_local_dns(runtime, apps, self._engine, self._config, desired)
-        results += apps.reconcile(runtime, containers, self._engine, desired, adopt)
+        results += apps.reconcile(runtime, containers, self._engine, desired, adopt, moved)
         return results + catalogue.proxy_sync(runtime, apps, containers, self._engine, self._config)

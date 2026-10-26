@@ -122,7 +122,7 @@ def test_a_portable_app_from_linux_gets_this_editions_recipe(bsd):
     base, app = linux_app(bsd, "vw", "vaultwarden")
     bsd.outputs[("containers", "info")] = ("5.9.1", "")
     desired = {"enabled": True, "apps": {"vw": app}}
-    adopt = lambda name, record, file: catalogue.adopt(bsd, name, record, file)
+    adopt = lambda name, record, file: catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), name, record, file)
     [result] = apps.reconcile(runtime, containers, bsd, desired, adopt)
     assert result.target_state == "applied" and bsd.actions()[-1] == "containers.compose_up"
     assert {"appjail-director.yml", "Makejail", "vaultwarden.rc"} <= {p.name for p in base.iterdir()}
@@ -132,20 +132,49 @@ def test_a_portable_app_from_linux_gets_this_editions_recipe(bsd):
     assert (base / "data" / "db.sqlite3").read_text() == "vault"
 
 
-def test_an_app_whose_data_does_not_move_stays_down_with_a_reason(bsd):
+def test_an_app_that_cannot_be_installed_again_stays_down_with_a_reason(bsd, monkeypatch):
+    import catalogue
+
+    def refuse(*args):
+        raise catalogue.CatalogueError("port 8096 is already in use")
+
+    monkeypatch.setattr(catalogue, "reinstall", refuse)
+    base, app = linux_app(bsd, "films", "jellyfin")
+    problem = catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), "films", app,
+                              str(base / "appjail-director.yml"))
+    assert "could not be installed again" in problem and "8096" in problem
+    assert not (base / "appjail-director.yml").exists()
+
+
+def test_an_app_whose_data_does_not_move_is_installed_again_on_it(bsd, monkeypatch):
+    import catalogue
+    done = []
+    monkeypatch.setattr(catalogue, "reinstall", lambda *args: done.append(args[5]))
+    base, app = linux_app(bsd, "films", "jellyfin")
+    assert catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), "films", app,
+                           str(base / "appjail-director.yml")) is None
+    assert done == ["films"]
+
+
+def test_an_app_moved_from_another_edition_is_adopted_even_with_an_old_file_beside_it(bsd):
     import catalogue
     base, app = linux_app(bsd, "films", "jellyfin")
-    problem = catalogue.adopt(bsd, "films", app, str(base / "appjail-director.yml"))
-    assert "cannot be used here" in problem
-    assert not (base / "appjail-director.yml").exists()
-    assert "folder_own" not in [a for _, a, _ in bsd.calls]
+    (base / "appjail-director.yml").write_text("services: {}\n")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    seen = []
+    adopt = lambda name, record, file: seen.append(name) or "stays down"
+    apps.reconcile(runtime, containers, bsd, {"enabled": True, "apps": {"films": app}}, adopt,
+                   lambda record: catalogue.moved(bsd, record))
+    assert seen == ["films"]
+    assert catalogue.moved(bsd, {**app, "recipe": "freebsd"}) is False
 
 
 def test_a_missing_file_on_the_same_edition_is_only_reported(bsd):
     import catalogue
     base, app = linux_app(bsd, "vw", "vaultwarden")
     app["recipe"] = "freebsd"
-    assert catalogue.adopt(bsd, "vw", app, str(base / "appjail-director.yml")).endswith("is missing")
+    assert catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), "vw", app,
+                           str(base / "appjail-director.yml")).endswith("is missing")
 
 
 def test_a_stopped_app_whose_jails_started_at_boot_is_taken_down(bsd, config):
@@ -170,3 +199,33 @@ def test_nextcloud_goes_behind_the_proxy_on_freebsd_too(bsd):
     assert "expose: !ENV '${PORT}:80'" in plain and "OVERWRITEPROTOCOL" not in plain
     assert "expose" not in behind
     assert "TRUSTED_PROXIES: 10.231.0.1" in behind and "OVERWRITEPROTOCOL" not in behind
+
+
+def test_a_power_cut_s_leftovers_are_cleared_before_an_app_starts(bsd, config):
+    apps.create(runtime, bsd, config, "site", DIRECTOR, files={"makejail": MAKEJAIL})
+    bsd.outputs[("containers", "ps")] = (JAILS.replace("site-web\tUP", "site-web\tDOWN"), "")
+    bsd.outputs[("containers", "app_members")] = (DESCRIBE, "")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    apps.reconcile(runtime, containers, bsd, {"enabled": True, "apps": {"site": {"dataset": "tank/apps/site", "state": "up"}}})
+    own = [a for a in bsd.actions() if a.startswith("containers.compose")]
+    assert own[-2:] == ["containers.compose_repair", "containers.compose_up"]
+    [repair] = [kw for c, a, kw in bsd.calls if a == "compose_repair"]
+    assert repair["project"] == "site"
+
+
+def test_a_reinstall_frees_the_proxy_port_first_and_keeps_the_app_when_it_fails(bsd, monkeypatch):
+    import catalogue
+    base, app = linux_app(bsd, "films", "jellyfin")
+    config = FakeConfig({"enabled": True, "pool": "tank", "datasets": {}, "apps": {"films": app}})
+    order = []
+    monkeypatch.setattr(catalogue, "proxy_sync", lambda *args: order.append("proxy_sync") or [])
+
+    def fail(*args):
+        order.append("install")
+        raise catalogue.CatalogueError("port 8096 is already in use")
+
+    monkeypatch.setattr(catalogue, "install", fail)
+    with pytest.raises(catalogue.CatalogueError):
+        catalogue.reinstall(runtime, apps, containers, bsd, config, "films", app, str(base / "appjail-director.yml"))
+    assert order == ["proxy_sync", "install"]
+    assert config.get_module_config("containers")["apps"]["films"] == app

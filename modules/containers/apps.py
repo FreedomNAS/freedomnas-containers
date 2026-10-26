@@ -301,6 +301,17 @@ def update(runtime, engine, config, name: str, text: str, files: Optional[Dict[s
     engine.execute_with_stdin(CATEGORY, "compose_write", text, file=file)
 
 
+def _repair(engine, name: str) -> None:
+    """
+    Undo what a power cut left half done before starting the app again
+    (`compose_repair`: AppJail Director's project lock and an emptied copy
+    of its spec, AppJail's jail locks), unless something is working on it.
+    Runtimes that leave nothing behind have no such action.
+    """
+    if _profile(engine, "compose_repair"):
+        engine.execute(CATEGORY, "compose_repair", project=name, check=False)
+
+
 def set_state(runtime, engine, config, name: str, state: str) -> None:
     if state not in STATES:
         raise AppError(f"Unknown state '{state}'")
@@ -309,6 +320,8 @@ def set_state(runtime, engine, config, name: str, state: str) -> None:
     if not app:
         raise AppError(f"No app '{name}'")
     file = compose_file(runtime, engine, app["dataset"])
+    if state == "up":
+        _repair(engine, name)
     _compose(engine, "compose_up" if state == "up" else "compose_down", name, file)
     app["state"] = state
     _save(config, apps)
@@ -323,6 +336,7 @@ def refresh(runtime, engine, config, name: str) -> None:
     if _profile(engine, "compose_pull"):
         _compose(engine, "compose_pull", name, file)
     if app.get("state") == "up":
+        _repair(engine, name)
         _compose(engine, "compose_update" if _profile(engine, "compose_update") else "compose_up", name, file)
 
 
@@ -364,14 +378,16 @@ def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:
                         target_state="failed" if error else "applied", error=error)
 
 
-def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None) -> List[ActionResult]:
+def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None, moved=None) -> List[ActionResult]:
     """
     Bring up every app recorded as up whose containers are not all running,
     and take down every app recorded as down whose containers run (a
     runtime may start them at boot by itself). An app whose file for this
-    runtime is missing (its pool came from another edition) is handed to
-    `adopt(name, app, file)`, which writes the file or answers why it
-    cannot.
+    runtime is missing, or that `moved(app)` says was last installed on
+    another edition (its pool came from there; a file this edition wrote
+    long ago may still be beside the data), is handed to
+    `adopt(name, app, file)`, which makes it this edition's or answers why
+    it cannot.
     """
     apps = desired.get("apps") or {}
     wanted = {name: app for name, app in apps.items() if app.get("state") == "up"}
@@ -403,11 +419,12 @@ def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None) -> List[
         try:
             check_name(name)
             file = compose_file(runtime, engine, app["dataset"])
-            if not Path(file).exists():
+            if not Path(file).exists() or (moved and moved(app)):
                 problem = adopt(name, app, file) if adopt else f"{file} is missing"
                 if problem:
                     results.append(_result(name, problem, app=name))
                     continue
+            _repair(engine, name)
             _compose(engine, "compose_up", name, file)
             results.append(_result(name, app=name))
         except Exception as exc:

@@ -263,6 +263,7 @@
     },
     "proxy_upstream": "address",
     "script_write": "sh -c 'umask 022 && mkdir -p \"${{1%/*}}\" && cat > \"$1\" && chmod 755 \"$1\"' script_write {file}",
-    "folder_take": "chown -R {uid}:{gid} {path}"
+    "folder_take": "chown -R {uid}:{gid} {path}",
+    "compose_repair": "sh -c 'p=$1; ps -axww -o command | grep -v grep | grep -Eq \"appjail-director .*-p $p( |\\$)|appjail (start|stop|run|jail) .*$p-\" && exit 0; rm -f \"/tmp/director/locks/$p/lock\"; f=\"/root/.director/projects/$p/appjail-director.yml\"; [ -f \"$f\" ] && [ ! -s \"$f\" ] && rm -f \"$f\"; for j in $(appjail jail list -HIpt name 2>/dev/null | grep \"^$p-\"); do appjail jail mark unlocked \"$j\" >/dev/null 2>&1; done; exit 0' compose_repair {project}"
   }
 }

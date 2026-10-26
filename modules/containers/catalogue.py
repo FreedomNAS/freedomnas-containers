@@ -607,13 +607,69 @@ def _write_recipe(engine, folder: Path, base: Path) -> None:
             engine.execute_with_stdin(CATEGORY, "compose_write", path.read_text(), file=str(base / path.name))
 
 
-def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
+def moved(engine, app: Dict[str, Any]) -> bool:
+    """A catalogue app last installed by another edition's recipe."""
+    return bool(app.get("catalogue")) and (app.get("recipe") or "linux") != recipe_name(engine)
+
+
+def _account_of(uid: str) -> Optional[str]:
+    try:
+        return pwd.getpwuid(int(uid)).pw_name
+    except (KeyError, ValueError):
+        return None
+
+
+def _kept_values(item: Dict[str, Any], env: Dict[str, str], config, engine) -> Dict[str, str]:
+    """An install's values from a kept .env: the same folders, ports, account and passwords."""
+    accounts = _accounts(config)
+    values = defaults(item, config, accounts[0] if accounts else "", set(), engine)
+    for setting in item.get("settings", []):
+        key = setting["key"]
+        if setting["type"] == "user":
+            account = _account_of(env.get(setting["uid"], ""))
+            if account in accounts:
+                values[key] = account
+        elif setting["type"] != "secret" and env.get(key):
+            values[key] = env[key]
+    return values
+
+
+def reinstall(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], file: str) -> None:
+    """
+    Install the app again from the catalogue over the data it kept, with the
+    values of its old .env (passwords and secrets come along: see install),
+    and bring it up: this edition's recipe, folders' owners, paths and
+    reverse proxy address replace those of wherever it ran before. The
+    proxy lets go of the app's port first, as when the app is removed from
+    the page; when the install fails, the app stays recorded as it was.
+    """
+    item = entry(app["catalogue"])
+    env_path = Path(file).with_name(ENV_FILE)
+    env = parse_env(env_path.read_text()) if env_path.exists() else {}
+    values = _kept_values(item, env, config, engine)
+    record = dict((config.get_module_config("containers").get("apps") or {})[name])
+    apps.remove(runtime, engine, config, name)
+    try:
+        proxy_sync(runtime, apps, rt, engine, config)
+        install(runtime, apps, rt, engine, config, item["id"], name, values)
+    except Exception:
+        section = config.get_module_config("containers")
+        section.setdefault("apps", {})[name] = record
+        config.set_module_config("containers", section)
+        raise
+    apps.set_state(runtime, engine, config, name, "up")
+
+
+def adopt(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
     """
     An app from the catalogue whose pool comes from another edition: when
     the entry lists both recipes under "portable", write this edition's
     recipe beside its data and .env, give the app's own folders (./name,
     never a folder of the pool it only mounts) to this edition's owners,
-    and answer None; otherwise answer why it cannot start here.
+    and answer None. Any other app is installed again from the catalogue
+    over its kept data (reinstall), and None answered once it is up; what
+    stops that (data newer than the catalogue's release, a port taken) is
+    the answer instead, the data left as they are.
     """
     if not app.get("catalogue"):
         return f"{file} is missing"
@@ -630,8 +686,12 @@ def adopt(engine, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
         return f"{item['name']} is not available on this edition yet; its dataset is kept"
     portable = item.get("portable") or []
     if here not in portable or was not in portable:
-        return (f"{item['name']} was installed on another edition ({was}): its data cannot be used here. "
-                f"Remove it keeping its dataset, or install it again from the catalogue; the dataset is kept")
+        try:
+            reinstall(runtime, apps, rt, engine, config, name, app, file)
+        except Exception as exc:
+            return (f"{item['name']} came from another edition ({was}) and could not be installed again on "
+                    f"its kept data: {exc}. Install it again from the catalogue; the dataset is kept")
+        return None
     env_path = base / ENV_FILE
     env = parse_env(env_path.read_text()) if env_path.exists() else {}
     env["APP"] = name
