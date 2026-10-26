@@ -1,6 +1,6 @@
 services:
   jellyfin:
-    image: jellyfin/jellyfin:latest
+    image: jellyfin/jellyfin:${JELLYFIN_VERSION}
     user: "${PUID}:${PGID}"
     ports:
       - "${WEB_PUBLISH:-${PORT}}:8096"

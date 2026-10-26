@@ -5,6 +5,8 @@ services:
   jellyfin:
     name: !ENV '${APP}-jellyfin'
     makejail: ./Makejail
+    arguments:
+      - jellyfin_tag: !ENV '${JELLYFIN_FREEBSD_IMAGE}'
     options:
       - template: ./template.conf
       - expose: !ENV '${PORT}:8096'

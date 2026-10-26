@@ -1,6 +1,6 @@
 services:
   pihole:
-    image: pihole/pihole:latest
+    image: pihole/pihole:${PIHOLE_RELEASE}
     ports:
       - "${DNS_ADDRESS}:53:53/tcp"
       - "${DNS_ADDRESS}:53:53/udp"

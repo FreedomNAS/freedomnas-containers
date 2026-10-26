@@ -12,5 +12,7 @@
      "hint": "The account Jellyfin's files belong to; it needs to read the media folder."},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}
   ],
-  "prepare": ["./config", "./cache"]
+  "prepare": ["./config", "./cache"],
+  "fixed": {"JELLYFIN_VERSION": "10.11.11",
+            "JELLYFIN_FREEBSD_IMAGE": "latest@sha256:dd6484de4e327d87392605f749e4eed3ff6b2cf57c781e455bc4b9efbc16f14d"}
 }

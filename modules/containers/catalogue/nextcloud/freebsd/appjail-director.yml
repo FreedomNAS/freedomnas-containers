@@ -5,6 +5,8 @@ services:
   db:
     name: !ENV '${APP}-db'
     makejail: ./mariadb.makejail
+    arguments:
+      - mariadb_tag: !ENV '${MARIADB_FREEBSD_IMAGE}'
     priority: 98
     oci:
       arguments: ["--transaction-isolation=READ-COMMITTED"]
@@ -29,7 +31,10 @@ services:
       - hooks: /entrypoint-hooks.d
       #@shares
     oci:
+      entrypoint: ["/bin/sh", "/entrypoint-hooks.d/freedomnas-release.sh"]
+      arguments: ["httpd-foreground"]
       environment:
+        - NEXTCLOUD_RELEASE: !ENV '${NEXTCLOUD_VERSION}'
         - MYSQL_HOST: !ENV '${APP}-db.fnasjails.appjail'
         - MYSQL_DATABASE: nextcloud
         - MYSQL_USER: nextcloud

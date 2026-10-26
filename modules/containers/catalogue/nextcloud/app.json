@@ -18,14 +18,16 @@
     {"key": "DB_ROOT_PASSWORD", "type": "secret"},
     {"key": "TZ", "label": "Time zone", "type": "timezone"}
   ],
-  "fixed": {"NEXTCLOUD_VERSION": "35.0.2"},
+  "fixed": {"NEXTCLOUD_VERSION": "35.0.2", "MARIADB_VERSION": "12.3.3",
+            "MARIADB_FREEBSD_IMAGE": "latest@sha256:a913f597daa7d6bcd96ab37a0d0d08cedb20dcfa1ffd0edbcc722a8827f6e3c2"},
   "data_version": {"file": "./html/version.php", "pattern": "OC_VersionString = '([0-9.]+)'", "key": "NEXTCLOUD_VERSION"},
   "share_mounts": {
     "linux": {"#@shares": "      - {path}:/shares/{name}"},
     "freebsd": {"#@shares": "      - share-{name}: /shares/{name}", "#@share-volumes": "  share-{name}:\n    device: {path}"}
   },
   "scripts": {"freedomnas-move.sh": ["./hooks/pre-upgrade", "./hooks/before-starting"],
-              "freedomnas-shares.sh": ["./hooks/before-starting"]},
+              "freedomnas-shares.sh": ["./hooks/before-starting"],
+              "freedomnas-release.sh": ["./hooks"]},
   "owned": [{"path": "./html", "owner": {"linux": "33:33", "freebsd": "80:80"}},
             {"setting": "DATA", "owner": {"linux": "33:33", "freebsd": "80:80"}}]
 }

@@ -44,7 +44,8 @@ Setting types in app.json:
               "show" is set
     secret    always generated, never shown
 `scripts` names files of the recipe written, executable, into folders of
-the app ({"file": ["./folder", ...]}) instead of beside the recipe.
+the app ({"file": ["./folder", ...]}) instead of beside the recipe; a
+recipe without one of them simply has none.
 `owned` lists folders whose whole tree belongs to the app's account
 ({"path": "./name"} or {"setting": KEY}, with "owner" per recipe): on an
 install over kept data whose folder belongs to someone else (data that
@@ -53,10 +54,12 @@ is given to that account.
 `fixed` holds values the user never changes (an app's release, such as
 NEXTCLOUD_VERSION: the same on every edition, so its data can move between
 them); the app's Update writes the catalogue's current ones into its .env
-(refresh_fixed) before fetching the images again. `data_version` names the
-file of the app's data that records the release that last wrote it
-({"file", "pattern", "key"}): an install over kept data written by a newer
-release than `fixed[key]` is refused, since the app cannot go back.
+(refresh_fixed) before fetching the images again. The releases an app is
+installed or updated with are written into its dataset (RELEASE_FILE), and
+`data_version` can name a file of the app's own that records the release
+that last wrote its data ({"file", "pattern", "key"}): an install over kept
+data written by a newer release than `fixed` names is refused, since apps
+upgrade their data and never go back.
 `prepare` lists folders
 created before the first start ("./name", or {"path", "owner"} with the
 owner per recipe; with "tls" the folder also gets a copy of FreedomNAS's
@@ -124,6 +127,7 @@ records = _load("records")
 CATEGORY = "containers"
 ROOT = Path(__file__).with_name("catalogue")
 ENV_FILE = ".env"
+RELEASE_FILE = ".freedomnas-release"
 SYSTEM_DIRS = ("/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/run",
                "/sbin", "/sys", "/usr", "/var")
 
@@ -1074,17 +1078,34 @@ def data_release(item: Dict[str, Any], base: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def _versioned(text: str) -> bool:
+    return bool(re.fullmatch(r"\d+(\.\d+)*", text or ""))
+
+
+def kept_releases(item: Dict[str, Any], base: Path) -> Dict[str, str]:
+    """The releases that last wrote the app's kept data: RELEASE_FILE, then the app's own file."""
+    path = base / RELEASE_FILE
+    found = parse_env(path.read_text()) if path.exists() else {}
+    own = data_release(item, base)
+    if own:
+        found[item["data_version"]["key"]] = own
+    return found
+
+
 def check_data_release(item: Dict[str, Any], base: Path, env: Dict[str, str]) -> None:
-    spec = item.get("data_version")
-    found = data_release(item, base)
-    if not spec or not found:
-        return
-    wanted = env.get(spec["key"], "")
-    if wanted and _release(found) > _release(wanted):
-        raise CatalogueError(
-            f"{item['name']}'s data was last written by release {found}, newer than the {wanted} this NAS "
-            f"installs: {item['name']} never goes back to an older release. Update FreedomNAS until its "
-            f"catalogue reaches {found} or later, then install it again on the kept data")
+    for key, found in kept_releases(item, base).items():
+        wanted = env.get(key, "")
+        if _versioned(found) and _versioned(wanted) and _release(found) > _release(wanted):
+            raise CatalogueError(
+                f"{item['name']}'s data was last written by release {found}, newer than the {wanted} this NAS "
+                f"installs: {item['name']} never goes back to an older release. Update FreedomNAS until its "
+                f"catalogue reaches {found} or later, then install it again on the kept data")
+
+
+def record_releases(engine, item: Dict[str, Any], base: Path, env: Dict[str, str]) -> None:
+    fixed = {key: env[key] for key in item.get("fixed") or {} if key in env}
+    if fixed:
+        engine.execute_with_stdin(CATEGORY, "compose_write", render_env(fixed), file=str(base / RELEASE_FILE))
 
 
 def refresh_fixed(runtime, apps, engine, config, name: str) -> bool:
@@ -1107,6 +1128,7 @@ def refresh_fixed(runtime, apps, engine, config, name: str) -> bool:
     env.update(fixed)
     check_data_release(item, env_path.parent, env)
     engine.execute_with_stdin(CATEGORY, "env_write", render_env(env), file=str(env_path))
+    record_releases(engine, item, env_path.parent, env)
     return True
 
 
@@ -1131,7 +1153,7 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     if behind:
         record_proxy = go_behind(rt, engine, config, item, env)
     sources = _recipe_files(folder, behind)
-    scripts = {file_name: sources.pop(file_name) for file_name in item.get("scripts", {})}
+    scripts = {file_name: sources.pop(file_name) for file_name in item.get("scripts", {}) if file_name in sources}
     shares = [s for setting in item.get("settings", []) if setting["type"] == "shares"
               for s in _chosen_shares(config, setting, str(values.get(setting["key"], "")))]
     text = _render_share_mounts(item, recipe_name(engine), sources.pop(app_file), shares)
@@ -1178,6 +1200,7 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
         if names is not None:
             engine.execute_with_stdin(CATEGORY, "compose_write", names, file=str(_local_dns_path(base, item)))
         _attach_shares(engine, config, item, values, env, name)
+        record_releases(engine, item, base, env)
     except Exception:
         apps.remove(runtime, engine, config, name)
         raise

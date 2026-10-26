@@ -1,6 +1,6 @@
 services:
   db:
-    image: mariadb:11.4
+    image: mariadb:${MARIADB_VERSION}
     command: --transaction-isolation=READ-COMMITTED
     volumes:
       - ./db:/var/lib/mysql
@@ -9,6 +9,7 @@ services:
       MARIADB_DATABASE: nextcloud
       MARIADB_USER: nextcloud
       MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_AUTO_UPGRADE: '1'
       TZ: ${TZ}
     restart: unless-stopped
   app:

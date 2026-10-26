@@ -71,5 +71,6 @@
     "header": "# FreedomNAS: every name under these domains is this NAS, where the reverse proxy serves its sites by name\n",
     "line": "address=/{domain}/{address}\n",
     "off": "# FreedomNAS: the reverse proxy serves no sites by name\n"
-  }
+  },
+  "fixed": {"PIHOLE_RELEASE": "2026.10.0"}
 }

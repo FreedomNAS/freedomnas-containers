@@ -740,3 +740,33 @@ def test_update_brings_the_app_to_the_catalogue_s_release(nas, config, media_sha
     assert new["NEXTCLOUD_VERSION"] == catalogue.entry("nextcloud")["fixed"]["NEXTCLOUD_VERSION"]
     assert new["ADMIN_PASSWORD"] == old["ADMIN_PASSWORD"]
     assert not catalogue.refresh_fixed(runtime, apps, nas, config, "nextcloud")
+
+
+@pytest.mark.parametrize("app_id, key, image", [
+    ("jellyfin", "JELLYFIN_VERSION", "jellyfin/jellyfin:${JELLYFIN_VERSION}"),
+    ("vaultwarden", "VAULTWARDEN_VERSION", "vaultwarden/server:${VAULTWARDEN_VERSION}"),
+    ("pihole", "PIHOLE_RELEASE", "pihole/pihole:${PIHOLE_RELEASE}"),
+    ("nextcloud", "NEXTCLOUD_VERSION", "nextcloud:${NEXTCLOUD_VERSION}-apache")])
+def test_every_app_that_moves_between_editions_runs_a_pinned_release(app_id, key, image):
+    item = catalogue.entry(app_id)
+    assert item["fixed"][key]
+    assert f"image: {image}" in (item["_dir"] / "linux/compose.yaml").read_text()
+
+
+@pytest.mark.parametrize("app_id, argument", [("jellyfin", "jellyfin_tag: !ENV '${JELLYFIN_FREEBSD_IMAGE}'"),
+                                              ("nextcloud", "NEXTCLOUD_RELEASE: !ENV '${NEXTCLOUD_VERSION}'")])
+def test_freebsd_recipes_get_the_same_release(app_id, argument):
+    folder = catalogue.entry(app_id)["_dir"] / "freebsd"
+    for recipe in (folder / "appjail-director.yml", folder / "proxied" / "appjail-director.yml"):
+        assert argument in recipe.read_text()
+
+
+def test_an_install_records_its_releases_and_newer_data_is_refused(nas, config, media_share):
+    install(nas, config, "jellyfin")
+    base = Path(nas.datasets["tank/apps/jellyfin"]["mountpoint"])
+    recorded = catalogue.parse_env((base / catalogue.RELEASE_FILE).read_text())
+    assert recorded["JELLYFIN_VERSION"] == catalogue.entry("jellyfin")["fixed"]["JELLYFIN_VERSION"]
+    apps.remove(runtime, nas, config, "jellyfin")
+    (base / catalogue.RELEASE_FILE).write_text(catalogue.render_env({**recorded, "JELLYFIN_VERSION": "99.0.0"}))
+    with pytest.raises(catalogue.CatalogueError, match="99.0.0"):
+        install(nas, config, "jellyfin")
