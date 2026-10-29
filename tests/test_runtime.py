@@ -103,10 +103,10 @@ def test_a_failed_start_records_nothing(engine, monkeypatch):
     assert config.section == {}
 
 
-def test_install_adds_the_repository_then_the_packages(engine):
+def test_install_refreshes_the_package_lists_adds_the_repository_then_the_packages(engine):
     runtime.install(engine)
     installs = [kw["package_name"] for c, a, kw in engine.calls if (c, a) == ("packages", "install")]
-    assert engine.actions()[0] == "containers.runtime_repository"
+    assert engine.actions()[:2] == ["packages.update_cache", "containers.runtime_repository"]
     assert "docker-ce" in installs and "docker-compose-plugin" in installs
 
 

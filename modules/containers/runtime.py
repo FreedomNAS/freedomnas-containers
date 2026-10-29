@@ -368,6 +368,7 @@ def status(engine, config) -> Dict[str, Any]:
 
 
 def install(engine) -> None:
+    engine.execute("packages", "update_cache", timeout=3600, check=False)
     if _value(engine, "runtime_repository"):
         engine.execute(CATEGORY, "runtime_repository", timeout=600)
     for name in packages(engine):
