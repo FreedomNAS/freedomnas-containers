@@ -14,6 +14,9 @@
     "freebsd"
   ],
   "depends_on": [],
+  "after": [
+    "proxy"
+  ],
   "webui": {
     "api_routes": "api_routes.py",
     "route_prefix": "/api/containers",
