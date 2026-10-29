@@ -664,6 +664,14 @@ def reinstall(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any],
     apps.set_state(runtime, engine, config, name, "up")
 
 
+def _recipe_on_disk(item: Dict[str, Any], base: Path, here: str) -> Optional[str]:
+    """Another edition's recipe whose files sit beside the app's data, whatever its record says."""
+    for folder in sorted(p for p in item["_dir"].iterdir() if p.is_dir() and p.name != here):
+        if any((base / f.name).is_file() for f in folder.iterdir() if f.is_file()):
+            return folder.name
+    return None
+
+
 def adopt(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], file: str) -> Optional[str]:
     """
     An app from the catalogue whose pool comes from another edition: when
@@ -682,6 +690,8 @@ def adopt(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], fil
     except CatalogueError as exc:
         return str(exc)
     here, was = recipe_name(engine), app.get("recipe") or "linux"
+    if here == was:
+        was = _recipe_on_disk(item, Path(file).parent, here) or was
     if here == was:
         return f"{file} is missing"
     base = Path(file).parent

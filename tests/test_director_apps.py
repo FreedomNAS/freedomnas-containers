@@ -169,9 +169,19 @@ def test_an_app_moved_from_another_edition_is_adopted_even_with_an_old_file_besi
     assert catalogue.moved(bsd, {**app, "recipe": "freebsd"}) is False
 
 
-def test_a_missing_file_on_the_same_edition_is_only_reported(bsd):
+def test_a_record_of_this_edition_over_another_editions_files_is_adopted(bsd):
     import catalogue
     base, app = linux_app(bsd, "vw", "vaultwarden")
+    app["recipe"] = "freebsd"
+    assert catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), "vw", app,
+                           str(base / "appjail-director.yml")) is None
+    assert (base / "appjail-director.yml").is_file()
+
+
+def test_a_missing_file_with_no_recipe_beside_the_data_is_only_reported(bsd):
+    import catalogue
+    base, app = linux_app(bsd, "vw", "vaultwarden")
+    (base / "compose.yaml").unlink()
     app["recipe"] = "freebsd"
     assert catalogue.adopt(runtime, apps, containers, bsd, FakeConfig(), "vw", app,
                            str(base / "appjail-director.yml")).endswith("is missing")
