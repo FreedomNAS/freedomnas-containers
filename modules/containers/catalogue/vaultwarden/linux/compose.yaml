@@ -15,4 +15,8 @@ services:
       - /bin/sh
       - -c
       - '[ "$$HTTPS" = true ] && export ROCKET_TLS={certs=\"/tls/cert.pem\",key=\"/tls/key.pem\"}; exec /start.sh'
+    healthcheck:
+      test: ["CMD-SHELL", 'if [ "$$HTTPS" = true ]; then curl -fsk https://127.0.0.1:80/alive; else curl -fs http://127.0.0.1:80/alive; fi']
+      interval: 60s
+      timeout: 10s
     restart: unless-stopped
