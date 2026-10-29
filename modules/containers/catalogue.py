@@ -829,7 +829,7 @@ def refresh_tls(runtime, apps, engine, desired: Dict[str, Any]) -> List:
             continue
         if running is None:
             running = runtime.info(engine) is not None
-        if running:
+        if running and Path(file).is_file():
             try:
                 apps._compose(engine, "compose_down", name, file)
             except Exception as exc:

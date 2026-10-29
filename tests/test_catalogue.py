@@ -434,6 +434,19 @@ def test_pihole_serves_https_with_freedomnas_certificate(nas, config, issued):
     assert (copy["uid"], copy["gid"]) == ("1000", "1000")
 
 
+def test_an_app_without_its_file_here_gets_the_copy_and_is_not_taken_down(nas, config, issued):
+    install(nas, config, "vaultwarden")
+    vaultwarden_tls(nas)
+    desired = config.get_module_config("containers")
+    desired["apps"]["vaultwarden"]["state"] = "up"
+    Path(apps.compose_file(runtime, nas, desired["apps"]["vaultwarden"]["dataset"])).unlink()
+    nas.calls.clear()
+    results = catalogue.refresh_tls(runtime, apps, nas, desired)
+    actions = [a for c, a, kw in nas.calls if c == "containers"]
+    assert "tls_copy" in actions and "compose_down" not in actions
+    assert all(r.target_state == "applied" for r in results)
+
+
 def test_a_copy_without_the_combined_file_is_made_again(nas, config, issued):
     install(nas, config, "vaultwarden")
     folder = vaultwarden_tls(nas)
