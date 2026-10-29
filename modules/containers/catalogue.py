@@ -1118,6 +1118,24 @@ def record_releases(engine, item: Dict[str, Any], base: Path, env: Dict[str, str
         engine.execute_with_stdin(CATEGORY, "compose_write", render_env(fixed), file=str(base / RELEASE_FILE))
 
 
+def update(runtime, apps, rt, engine, config, name: str) -> None:
+    """
+    The page's Update. A catalogue app takes the catalogue's release, then is
+    installed again from the catalogue over its kept data (reinstall), so
+    every fix to its recipe reaches installs made before it, and is left up
+    or down as it was; then its images are fetched again. Any other app only
+    fetches its images again.
+    """
+    record = dict(((config.get_module_config("containers") or {}).get("apps") or {}).get(name) or {})
+    if record.get("catalogue"):
+        refresh_fixed(runtime, apps, engine, config, name)
+        reinstall(runtime, apps, rt, engine, config, name, record,
+                  apps.compose_file(runtime, engine, record["dataset"]))
+        if record.get("state") != "up":
+            apps.set_state(runtime, engine, config, name, "down")
+    apps.refresh(runtime, engine, config, name)
+
+
 def refresh_fixed(runtime, apps, engine, config, name: str) -> bool:
     """
     Bring a catalogue app's .env to the catalogue's current `fixed` values

@@ -783,3 +783,28 @@ def test_an_install_records_its_releases_and_newer_data_is_refused(nas, config, 
     (base / catalogue.RELEASE_FILE).write_text(catalogue.render_env({**recorded, "JELLYFIN_VERSION": "99.0.0"}))
     with pytest.raises(catalogue.CatalogueError, match="99.0.0"):
         install(nas, config, "jellyfin")
+
+
+def _set_state(config, name, state):
+    section = config.get_module_config("containers")
+    section["apps"][name]["state"] = state
+    config.set_module_config("containers", section)
+
+
+def test_update_writes_the_catalogue_s_recipe_again_over_the_kept_data(nas, config):
+    install(nas, config, "vaultwarden")
+    _set_state(config, "vaultwarden", "up")
+    base = Path(nas.datasets["tank/apps/vaultwarden"]["mountpoint"])
+    (base / "compose.yaml").write_text("services:\n  vaultwarden:\n    image: vaultwarden/server:old\n")
+    token = env_of(nas, "vaultwarden")["ADMIN_TOKEN"]
+    catalogue.update(runtime, apps, containers, nas, config, "vaultwarden")
+    assert "healthcheck" in (base / "compose.yaml").read_text()
+    assert env_of(nas, "vaultwarden")["ADMIN_TOKEN"] == token
+    assert config.get_module_config("containers")["apps"]["vaultwarden"]["state"] == "up"
+
+
+def test_update_leaves_a_stopped_catalogue_app_stopped(nas, config):
+    install(nas, config, "vaultwarden")
+    _set_state(config, "vaultwarden", "down")
+    catalogue.update(runtime, apps, containers, nas, config, "vaultwarden")
+    assert config.get_module_config("containers")["apps"]["vaultwarden"]["state"] == "down"

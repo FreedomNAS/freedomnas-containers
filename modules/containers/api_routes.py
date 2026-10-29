@@ -268,8 +268,7 @@ async def app_action(name: str, action: str, username: str = Depends(authenticat
         return current
     if action == "update":
         def update():
-            catalogue.refresh_fixed(runtime, apps, engine, config, name)
-            apps.refresh(runtime, engine, config, name)
+            catalogue.update(runtime, apps, containers, engine, config, name)
         return _start_job("app", _with_proxy(engine, config, update))
     return _start_job("app", _with_proxy(engine, config, lambda: apps.set_state(runtime, engine, config, name, action)))
 
