@@ -407,6 +407,20 @@ def _result(action: str, error: Optional[str] = None, **params) -> ActionResult:
                         target_state="failed" if error else "applied", error=error)
 
 
+def ensure_installed(engine, desired: Dict[str, Any]) -> List[ActionResult]:
+    """
+    The runtime installed when the configuration has containers set up: at
+    the reconcile, and in an installer's chroot before the first boot.
+    """
+    if not desired.get("enabled") or not desired.get("datasets") or installed(engine):
+        return []
+    try:
+        install(engine)
+    except (ContainersError,) + ENGINE_ERRORS as exc:
+        return [_result("runtime", f"{runtime_name(engine)} could not be installed: {exc}")]
+    return [_result("install", runtime=runtime_name(engine))]
+
+
 def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative", config=None) -> List[ActionResult]:
     """
     Bring the runtime the configuration records back. A system without it
@@ -419,13 +433,9 @@ def reconcile(engine, desired: Dict[str, Any], mode: str = "declarative", config
     datasets = desired.get("datasets") or {}
     if not desired.get("enabled") or not datasets:
         return []
-    results: List[ActionResult] = []
-    if not installed(engine):
-        try:
-            install(engine)
-            results.append(_result("install", runtime=runtime_name(engine)))
-        except (ContainersError,) + ENGINE_ERRORS as exc:
-            return [_result("runtime", f"{runtime_name(engine)} could not be installed: {exc}")]
+    results = ensure_installed(engine, desired)
+    if any(r.target_state == "failed" for r in results):
+        return results
     pool = desired.get("pool") or next(iter(datasets.values())).split("/")[0]
     try:
         if pool not in pool_names(engine):

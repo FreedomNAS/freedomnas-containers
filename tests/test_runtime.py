@@ -116,6 +116,23 @@ def test_install_fails_when_docker_is_still_missing(engine):
         runtime.install(engine)
 
 
+def test_an_installer_chroot_gets_the_runtime_without_pools_or_services(engine):
+    engine.installed = False
+    original = engine.execute
+
+    def execute(category, action, **kw):
+        if (category, action) == ("packages", "install"):
+            engine.installed = True
+        return original(category, action, **kw)
+
+    engine.execute = execute
+    results = runtime.ensure_installed(engine, DESIRED)
+    assert [(r.action, r.target_state) for r in results] == [("containers.install", "applied")]
+    assert not [a for a in engine.actions() if a.startswith(("services.", "zfs."))]
+    assert runtime.ensure_installed(engine, DESIRED) == []
+    assert runtime.ensure_installed(engine, {}) == []
+
+
 def test_reconcile_does_nothing_when_not_set_up(engine):
     assert runtime.reconcile(engine, {}) == []
     assert engine.calls == []

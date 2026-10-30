@@ -84,6 +84,9 @@ class ContainersModule(FreedomNASModule):
             logger.warning("Containers health check failed: %s", exc)
             return False, str(exc)
 
+    def prepare(self, desired: dict) -> List:
+        return runtime.ensure_installed(self._engine, desired)
+
     def reconcile(self, desired: dict, mode: str = "declarative") -> List:
         results = runtime.reconcile(self._engine, desired, mode, self._config)
         if any(r.target_state == "failed" for r in results):
