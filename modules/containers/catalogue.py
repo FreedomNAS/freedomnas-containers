@@ -586,6 +586,27 @@ def _tls_folders(item: Dict[str, Any]) -> List[str]:
     return [entry["path"] for entry in item.get("prepare", []) if isinstance(entry, dict) and entry.get("tls")]
 
 
+def links(config) -> List[Dict[str, Any]]:
+    """
+    The web interface of every app that is up, for every account of the NAS:
+    its title and path, and its port unless the proxy serves it (the proxy
+    module gives that address, under the app's name).
+    """
+    found = []
+    for name, app in sorted((config.get_module_config(CATEGORY).get("apps") or {}).items()):
+        if app.get("state") != "up" or not app.get("web_port"):
+            continue
+        try:
+            item = entry(app["catalogue"]) if app.get("catalogue") else {}
+        except (CatalogueError, OSError, ValueError):
+            item = {}
+        link = {"name": name, "title": item.get("name") or name, "path": (item.get("web") or {}).get("path") or "/"}
+        if not app.get("proxy"):
+            link.update(scheme="https" if _tls_folders(item) else "http", port=int(app["web_port"]))
+        found.append(link)
+    return found
+
+
 def _owner(item: Dict[str, Any], env: Dict[str, str]) -> tuple:
     for setting in item.get("settings", []):
         if setting["type"] == "user":

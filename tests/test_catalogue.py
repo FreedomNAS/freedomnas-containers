@@ -808,3 +808,18 @@ def test_update_leaves_a_stopped_catalogue_app_stopped(nas, config):
     _set_state(config, "vaultwarden", "down")
     catalogue.update(runtime, apps, containers, nas, config, "vaultwarden")
     assert config.get_module_config("containers")["apps"]["vaultwarden"]["state"] == "down"
+
+
+def test_the_account_page_gets_every_app_that_is_up_and_its_port_unless_the_proxy_serves_it(config):
+    config.section["apps"] = {
+        "pihole": {"catalogue": "pihole", "state": "up", "web_port": "8053"},
+        "jellyfin": {"catalogue": "jellyfin", "state": "up", "web_port": "8096", "proxy": {"port": 8096}},
+        "mine": {"state": "up", "web_port": "9000"},
+        "vaultwarden": {"catalogue": "vaultwarden", "state": "down", "web_port": "8222"},
+        "nopage": {"state": "up"},
+    }
+    assert catalogue.links(config) == [
+        {"name": "jellyfin", "title": "Jellyfin", "path": "/"},
+        {"name": "mine", "title": "mine", "path": "/", "scheme": "http", "port": 9000},
+        {"name": "pihole", "title": "Pi-hole", "path": "/admin/", "scheme": "https", "port": 8053},
+    ]
