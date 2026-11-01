@@ -7,8 +7,8 @@ services:
     makejail: ./Makejail
     options:
       - expose: !ENV '${PORT}:80'
-      - expose: '53:53'
-      - expose: '53:53 proto:udp'
+      - expose: !ENV '53:53 ext_ip:${DNS_ADDRESS}'
+      - expose: !ENV '53:53 proto:udp ext_ip:${DNS_ADDRESS}'
     volumes:
       - etc: /usr/local/etc/pihole
       - dnsmasq: /usr/local/etc/dnsmasq.d
