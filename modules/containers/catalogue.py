@@ -745,6 +745,12 @@ def adopt(runtime, apps, rt, engine, config, name: str, app: Dict[str, Any], fil
     for path_text, uid, gid in _folders(item, env, here):
         if path_text.startswith("./"):
             engine.execute(CATEGORY, "folder_own", timeout=3600, uid=uid, gid=gid, path=str(base / path_text[2:]))
+    section = config.get_module_config(CATEGORY)
+    records = dict(section.get("apps") or {})
+    if name in records:
+        records[name] = {**records[name], "recipe": here}
+        section["apps"] = records
+        config.set_module_config(CATEGORY, section)
     return None
 
 

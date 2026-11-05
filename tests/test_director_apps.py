@@ -132,6 +132,20 @@ def test_a_portable_app_from_linux_gets_this_editions_recipe(bsd):
     assert (base / "data" / "db.sqlite3").read_text() == "vault"
 
 
+def test_a_portable_app_records_this_editions_recipe_once_moved(bsd):
+    import catalogue
+    _, app = linux_app(bsd, "vw", "vaultwarden")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    config = FakeConfig()
+    config.section["apps"] = {"vw": dict(app)}
+    assert catalogue.moved(bsd, config.section["apps"]["vw"])
+    adopt = lambda name, record, file: catalogue.adopt(runtime, apps, containers, bsd, config, name, record, file)
+    [result] = apps.reconcile(runtime, containers, bsd, {"enabled": True, "apps": {"vw": app}}, adopt)
+    assert result.target_state == "applied"
+    record = config.get_module_config("containers")["apps"]["vw"]
+    assert record["recipe"] == "freebsd" and not catalogue.moved(bsd, record)
+
+
 def test_an_app_that_cannot_be_installed_again_stays_down_with_a_reason(bsd, monkeypatch):
     import catalogue
 
