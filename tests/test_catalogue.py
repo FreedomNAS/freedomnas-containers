@@ -477,8 +477,7 @@ def test_an_app_installed_with_the_proxy_on_is_born_behind_it(behind, config):
     install(behind, config, "jellyfin")
     env = env_of(behind, "jellyfin")
     assert env["WEB_PUBLISH"] == "127.0.0.1:20000" and env["PORT"] == "8096"
-    record = config.get_module_config("containers")["apps"]["jellyfin"]["proxy"]
-    assert record == {"port": 8096, "inner": 8096, "upstream": "127.0.0.1:20000"}
+    assert config.get_module_config("containers")["apps"]["jellyfin"]["proxy"] is True
     apps.set_state(runtime, behind, config, "jellyfin", "up")
     behind.calls.clear()
     catalogue.proxy_sync(runtime, apps, containers, behind, config)
@@ -533,6 +532,47 @@ def test_two_apps_behind_the_proxy_get_two_internal_ports(behind, config):
     install(behind, config, "jellyfin")
     install(behind, config, "immich", PORT="2283")
     assert env_of(behind, "immich")["WEB_PUBLISH"] == "127.0.0.1:20001"
+
+
+def test_the_site_comes_from_the_apps_env_not_from_its_record(behind, config):
+    install(behind, config, "jellyfin")
+    apps.set_state(runtime, behind, config, "jellyfin", "up")
+    behind.calls.clear()
+    catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    [(_, text)] = site_writes(behind)
+    assert text.startswith("# freedomnas-site app jellyfin 8096 127.0.0.1:20000")
+    assert "127.0.0.1" not in str(config.get_module_config("containers")["apps"]["jellyfin"])
+
+
+def test_an_old_record_with_an_address_loses_it_and_keeps_its_site(behind, config):
+    install(behind, config, "jellyfin")
+    apps.set_state(runtime, behind, config, "jellyfin", "up")
+    config.section["apps"]["jellyfin"]["proxy"] = {"port": 1, "inner": 2, "upstream": "10.231.0.3:8096"}
+    behind.calls.clear()
+    results = catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    assert config.get_module_config("containers")["apps"]["jellyfin"]["proxy"] is True
+    [(_, text)] = site_writes(behind)
+    assert "10.231.0.3" not in text and " 8096 127.0.0.1:20000" in text
+    assert not any(r.action == "containers.apps.jellyfin.proxy" for r in results)
+
+
+def test_an_app_still_of_another_edition_has_no_site_and_does_not_move(behind, config):
+    install(behind, config, "jellyfin")
+    apps.set_state(runtime, behind, config, "jellyfin", "up")
+    config.section["apps"]["jellyfin"]["recipe"] = "freebsd"
+    behind.outputs[("proxy", "sites_list")] = ("# freedomnas-site app jellyfin 8096 127.0.0.1:20000\n", "")
+    behind.calls.clear()
+    results = catalogue.proxy_sync(runtime, apps, containers, behind, config)
+    assert site_writes(behind) == []
+    assert [kw["file"] for c, a, kw in behind.calls if a == "file_remove"] == [
+        "/etc/caddy/freedomnas-sites/app-jellyfin.caddy"]
+    assert not any(r.action == "containers.apps.jellyfin.proxy" for r in results)
+    assert not any(a == "compose_down" for c, a, kw in behind.calls)
+
+
+def test_a_portable_entry_never_goes_behind_the_proxy():
+    for item in catalogue.entries():
+        assert not (item.get("portable") and (item.get("web") or {}).get("inner")), item["id"]
 
 
 def test_a_removed_app_loses_its_site(behind, config):
@@ -813,7 +853,7 @@ def test_update_leaves_a_stopped_catalogue_app_stopped(nas, config):
 def test_the_account_page_gets_every_app_that_is_up_and_its_port_unless_the_proxy_serves_it(config):
     config.section["apps"] = {
         "pihole": {"catalogue": "pihole", "state": "up", "web_port": "8053"},
-        "jellyfin": {"catalogue": "jellyfin", "state": "up", "web_port": "8096", "proxy": {"port": 8096}},
+        "jellyfin": {"catalogue": "jellyfin", "state": "up", "web_port": "8096", "proxy": True},
         "mine": {"state": "up", "web_port": "9000"},
         "vaultwarden": {"catalogue": "vaultwarden", "state": "down", "web_port": "8222"},
         "nopage": {"state": "up"},
