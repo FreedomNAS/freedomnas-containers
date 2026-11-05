@@ -575,6 +575,19 @@ def test_a_portable_entry_never_goes_behind_the_proxy():
         assert not (item.get("portable") and (item.get("web") or {}).get("inner")), item["id"]
 
 
+def test_an_apps_own_stopped_leftover_does_not_hold_its_ports(nas):
+    class Runtime:
+        @staticmethod
+        def containers(engine):
+            return [{"name": "pihole-pihole", "state": "stopped", "host_ports": [8053, 53]},
+                    {"name": "other-web", "state": "stopped", "host_ports": [9000]},
+                    {"name": "pihole-extra", "state": "running", "host_ports": [8054]}]
+
+    assert catalogue.used_ports(Runtime, nas) >= {8053, 53, 9000, 8054}
+    taken = catalogue.used_ports(Runtime, nas, installing="pihole")
+    assert 8053 not in taken and taken >= {9000, 8054}
+
+
 def test_a_removed_app_loses_its_site(behind, config):
     install(behind, config, "jellyfin")
     apps.remove(runtime, behind, config, "jellyfin")

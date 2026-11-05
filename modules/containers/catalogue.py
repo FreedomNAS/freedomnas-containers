@@ -202,14 +202,16 @@ def _elsewhere(listen: str, address: str) -> bool:
 
 
 def used_ports(rt, engine, public_only: bool = False, config=None,
-               address: Optional[str] = None) -> Set[int]:
+               address: Optional[str] = None, installing: Optional[str] = None) -> Set[int]:
     """
     Ports something on the NAS listens on (TCP or UDP), the ports
     containers publish, stopped ones included, and the ports of catalogue
     apps that are down. public_only leaves out what listens on loopback
     only, for a port published on one address; with that address, also
     what listens on another address of the NAS only (AppJail's dnsmasq for
-    the jails, a bridge's own address).
+    the jails, a bridge's own address). A stopped container of the app being
+    installed does not count: it is that app's own leftover from an earlier
+    install on this runtime, and the install replaces it.
     """
     ports: Set[int] = set()
     if config is not None:
@@ -226,7 +228,10 @@ def used_ports(rt, engine, public_only: bool = False, config=None,
         pass
     try:
         for container in rt.containers(engine):
-            ports.update(container.get("host_ports") or [])
+            leftover = installing and container.get("state") != "running" \
+                and str(container.get("name") or "").startswith(f"{installing}-")
+            if not leftover:
+                ports.update(container.get("host_ports") or [])
     except Exception:
         pass
     return ports
@@ -1234,8 +1239,9 @@ def install(runtime, apps, rt, engine, config, entry_id: str, name: str,
     if folder is None:
         raise CatalogueError(f"{item['name']} is not available on this edition yet")
     address = next((values.get(s["key"]) for s in item.get("settings", []) if s.get("type") == "address"), None)
-    env = resolve(item, values, engine, config, used_ports(rt, engine, config=config),
-                  used_ports(rt, engine, public_only=True, config=config, address=address or _local_address()))
+    env = resolve(item, values, engine, config, used_ports(rt, engine, config=config, installing=name),
+                  used_ports(rt, engine, public_only=True, config=config, address=address or _local_address(),
+                             installing=name))
     env["APP"] = name
     behind = proxy_wanted(engine, config, item)
     if behind:
