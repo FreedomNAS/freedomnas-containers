@@ -387,7 +387,8 @@ def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None, moved=No
     another edition (its pool came from there; a file this edition wrote
     long ago may still be beside the data), is handed to
     `adopt(name, app, file)`, which makes it this edition's or answers why
-    it cannot.
+    it cannot. Containers an earlier stay on this edition left running are
+    stopped first: the runtime starts them by itself, on the old recipe.
     """
     apps = desired.get("apps") or {}
     wanted = {name: app for name, app in apps.items() if app.get("state") == "up"}
@@ -414,12 +415,15 @@ def reconcile(runtime, rt, engine, desired: Dict[str, Any], adopt=None, moved=No
             results.append(_result(f"{name}.down", _stderr(exc), app=name))
     for name, app in sorted(wanted.items()):
         own = members(runtime, engine, containers, name, app)
-        if own and all(c["state"] == "running" for c in own):
+        from_elsewhere = bool(moved and moved(app))
+        if own and all(c["state"] == "running" for c in own) and not from_elsewhere:
             continue
         try:
             check_name(name)
             file = compose_file(runtime, engine, app["dataset"])
-            if not Path(file).exists() or (moved and moved(app)):
+            if from_elsewhere and own and Path(file).exists():
+                _compose(engine, "compose_down", name, file)
+            if not Path(file).exists() or from_elsewhere:
                 problem = adopt(name, app, file) if adopt else f"{file} is missing"
                 if problem:
                     results.append(_result(name, problem, app=name))

@@ -146,6 +146,23 @@ def test_a_portable_app_records_this_editions_recipe_once_moved(bsd):
     assert record["recipe"] == "freebsd" and not catalogue.moved(bsd, record)
 
 
+def test_a_moved_app_the_runtime_left_running_still_becomes_this_editions(bsd, monkeypatch):
+    import catalogue
+    base, app = linux_app(bsd, "vw", "vaultwarden")
+    (base / "appjail-director.yml").write_text("old")
+    bsd.outputs[("containers", "info")] = ("5.9.1", "")
+    monkeypatch.setattr(apps, "members", lambda *args: [{"state": "running"}])
+    config = FakeConfig()
+    config.section["apps"] = {"vw": dict(app)}
+    adopt = lambda name, record, file: catalogue.adopt(runtime, apps, containers, bsd, config, name, record, file)
+    moved = lambda record: catalogue.moved(bsd, record)
+    [result] = apps.reconcile(runtime, containers, bsd, {"enabled": True, "apps": {"vw": app}}, adopt, moved)
+    assert result.target_state == "applied"
+    actions = bsd.actions()
+    assert actions.index("containers.compose_down") < actions.index("containers.compose_up")
+    assert config.get_module_config("containers")["apps"]["vw"]["recipe"] == "freebsd"
+
+
 def test_an_app_that_cannot_be_installed_again_stays_down_with_a_reason(bsd, monkeypatch):
     import catalogue
 
