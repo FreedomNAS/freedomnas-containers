@@ -876,3 +876,19 @@ def test_the_account_page_gets_every_app_that_is_up_and_its_port_unless_the_prox
         {"name": "mine", "title": "mine", "path": "/", "scheme": "http", "port": 9000},
         {"name": "pihole", "title": "Pi-hole", "path": "/admin/", "scheme": "https", "port": 8053},
     ]
+
+
+def test_a_proxy_module_that_did_not_load_is_reported(config, monkeypatch):
+    import freedomnas.module_loader as module_loader
+
+    class Loader:
+        def __init__(self, engine, config):
+            self.failed = {"proxy": "SyntaxError in proxy/module.py, line 3: invalid syntax"}
+
+        def instances(self):
+            return []
+
+    monkeypatch.setattr(module_loader, "ModuleLoader", Loader)
+    [result] = catalogue._proxy_reconcile(apps, None, config)
+    assert result.target_state == "failed"
+    assert "the proxy module is not loaded: SyntaxError" in result.error

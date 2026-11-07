@@ -1099,11 +1099,14 @@ def _proxy_reconcile(apps, engine, config) -> List:
     except ImportError:
         return []
     try:
-        for manifest, module in ModuleLoader(engine, config).instances():
+        loader = ModuleLoader(engine, config)
+        for manifest, module in loader.instances():
             if manifest.get("id", module.name) == PROXY_CATEGORY:
                 return list(module.reconcile(config.get_module_config(PROXY_CATEGORY) or {}, "additive") or [])
     except Exception as exc:
         return [apps._result("proxy.follow", str(exc))]
+    if PROXY_CATEGORY in loader.failed:
+        return [apps._result("proxy.follow", f"the proxy module is not loaded: {loader.failed[PROXY_CATEGORY]}")]
     return []
 
 
