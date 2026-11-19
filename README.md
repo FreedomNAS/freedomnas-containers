@@ -1,7 +1,7 @@
 # freedomnas-containers
 
 FreedomNAS community module for containers, built from
-[freedomnas-module-template](https://codeberg.org/FreedomNAS/freedomnas-module-template).
+[freedomnas-module-template](https://github.com/FreedomNAS/freedomnas-module-template).
 Package: `freedomnas-module-containers`. User guide: *Containers* in the
 FreedomNAS documentation.
 
@@ -141,7 +141,7 @@ Each `containers-<os>.json` holds, under `containers`:
 | `app_file`, `compose_check`, `compose_write`, `compose_up`, `compose_down`, `compose_pull`, `compose_update`, `compose_remove`, `compose_logs`, `app_members` | apps: file name, checker (stdin, `{dir}`), project commands (`{project}`, `{file}`), the project's containers |
 | `env_write`, `folder_prepare`, `folder_own` | catalogue `.env`, folders, owners after a move (recursive) |
 | `tls_copy` | copy of FreedomNAS's certificate and key (`{cert}`, `{key}`) into a catalogue folder marked `tls` (Vaultwarden's and Pi-hole's `./tls`), plus `tls.pem` with key and certificate in one file and `hostname`, the NAS's hostname the certificate is for (`{hostname}`); copied again by the reconcile when FreedomNAS issues a new certificate |
-| `proxy_upstream` | how a catalogue app goes behind the [reverse proxy](https://codeberg.org/FreedomNAS/freedomnas-proxy): `publish` (the recipe publishes `${WEB_PUBLISH}`, set to `127.0.0.1:<internal port>`), `address` (the proxy reaches the app's member at its own address on the inner port; the recipe's `proxied/` files, when present, replace its own) |
+| `proxy_upstream` | how a catalogue app goes behind the [reverse proxy](https://github.com/FreedomNAS/freedomnas-proxy): `publish` (the recipe publishes `${WEB_PUBLISH}`, set to `127.0.0.1:<internal port>`), `address` (the proxy reaches the app's member at its own address on the inner port; the recipe's `proxied/` files, when present, replace its own) |
 | `catalogue_recipe`, `app_files` | the catalogue recipe folder of this edition; files of an app beside its app file (key -> name), edited in the WebUI |
 | `ui` | words and examples for the page: `container`, `app_tool`, `catalogue`, `name_required`, `volumes_label`, `run_hint`, `examples`, `app_example` |
 
